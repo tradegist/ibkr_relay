@@ -45,6 +45,23 @@ variable "webhook_secret" {
   sensitive   = true
 }
 
+variable "flex_token" {
+  description = "IBKR Flex Web Service token"
+  type        = string
+  sensitive   = true
+}
+
+variable "flex_query_id" {
+  description = "IBKR Trade Confirmation Flex Query ID"
+  type        = string
+}
+
+variable "poll_interval" {
+  description = "Flex poll interval in seconds"
+  type        = string
+  default     = "600"
+}
+
 variable "time_zone" {
   description = "Timezone in tz database format"
   type        = string

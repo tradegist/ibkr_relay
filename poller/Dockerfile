@@ -5,6 +5,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY relay.py .
+COPY poller.py .
 
-CMD ["python", "-u", "relay.py"]
+CMD ["python", "-u", "poller.py"]

@@ -24,7 +24,7 @@ source .env
 set +a
 
 # Validate required variables
-REQUIRED_VARS=(DO_API_TOKEN TWS_USERID TWS_PASSWORD VNC_SERVER_PASSWORD TARGET_WEBHOOK_URL WEBHOOK_SECRET)
+REQUIRED_VARS=(DO_API_TOKEN TWS_USERID TWS_PASSWORD VNC_SERVER_PASSWORD WEBHOOK_SECRET IBKR_FLEX_TOKEN IBKR_FLEX_QUERY_ID)
 for var in "${REQUIRED_VARS[@]}"; do
   if [[ -z "${!var:-}" ]]; then
     echo "Error: $var is not set in .env" >&2
@@ -38,8 +38,11 @@ export TF_VAR_tws_userid="$TWS_USERID"
 export TF_VAR_tws_password="$TWS_PASSWORD"
 export TF_VAR_trading_mode="${TRADING_MODE:-paper}"
 export TF_VAR_vnc_password="$VNC_SERVER_PASSWORD"
-export TF_VAR_webhook_url="$TARGET_WEBHOOK_URL"
+export TF_VAR_webhook_url="${TARGET_WEBHOOK_URL:-}"
 export TF_VAR_webhook_secret="$WEBHOOK_SECRET"
+export TF_VAR_flex_token="$IBKR_FLEX_TOKEN"
+export TF_VAR_flex_query_id="$IBKR_FLEX_QUERY_ID"
+export TF_VAR_poll_interval="${POLL_INTERVAL_SECONDS:-600}"
 export TF_VAR_time_zone="${TIME_ZONE:-America/New_York}"
 
 # Run Terraform

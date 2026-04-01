@@ -79,6 +79,9 @@ resource "digitalocean_droplet" "relay" {
       vnc_password   = var.vnc_password
       webhook_url    = var.webhook_url
       webhook_secret = var.webhook_secret
+      flex_token     = var.flex_token
+      flex_query_id  = var.flex_query_id
+      poll_interval  = var.poll_interval
       time_zone      = var.time_zone
     })
     destination = "/opt/ibkr-relay/.env"

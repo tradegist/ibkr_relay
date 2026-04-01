@@ -27,6 +27,8 @@ export TF_VAR_tws_password="${TWS_PASSWORD:-placeholder}"
 export TF_VAR_vnc_password="${VNC_SERVER_PASSWORD:-placeholder}"
 export TF_VAR_webhook_url="${TARGET_WEBHOOK_URL:-placeholder}"
 export TF_VAR_webhook_secret="${WEBHOOK_SECRET:-placeholder}"
+export TF_VAR_flex_token="${IBKR_FLEX_TOKEN:-placeholder}"
+export TF_VAR_flex_query_id="${IBKR_FLEX_QUERY_ID:-placeholder}"
 
 cd terraform
 terraform destroy -auto-approve -input=false

@@ -31,7 +31,7 @@ services:
       - "6080:8080"
 
   webhook-relay:
-    build: ./relay
+    build: ./remote-client
     restart: always
     depends_on:
       - ib-gateway
@@ -40,3 +40,13 @@ services:
       IB_HOST: ib-gateway
       IB_LIVE_PORT: "4003"
       IB_PAPER_PORT: "4004"
+
+  poller:
+    build: ./poller
+    restart: always
+    env_file: .env
+    volumes:
+      - poller-data:/data
+
+volumes:
+  poller-data:

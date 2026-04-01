@@ -19,6 +19,9 @@ env:
   TF_VAR_vnc_password: ${{ secrets.VNC_SERVER_PASSWORD }}
   TF_VAR_webhook_url: ${{ secrets.TARGET_WEBHOOK_URL }}
   TF_VAR_webhook_secret: ${{ secrets.WEBHOOK_SECRET }}
+  TF_VAR_flex_token: ${{ secrets.IBKR_FLEX_TOKEN }}
+  TF_VAR_flex_query_id: ${{ secrets.IBKR_FLEX_QUERY_ID }}
+  TF_VAR_poll_interval: ${{ secrets.POLL_INTERVAL_SECONDS || '600' }}
   TF_VAR_time_zone: ${{ secrets.TIME_ZONE || 'America/New_York' }}
   AWS_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_KEY }}
