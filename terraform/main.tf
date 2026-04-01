@@ -84,6 +84,7 @@ resource "digitalocean_droplet" "relay" {
       poll_interval  = var.poll_interval
       time_zone      = var.time_zone
       vnc_domain     = var.vnc_domain
+      api_token      = var.api_token
     })
     destination = "/opt/ibkr-relay/.env"
   }

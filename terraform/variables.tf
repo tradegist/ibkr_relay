@@ -77,5 +77,10 @@ variable "droplet_region" {
 variable "vnc_domain" {
   description = "Domain for HTTPS VNC access (must have DNS A record pointing to droplet)"
   type        = string
+}
 
+variable "api_token" {
+  description = "Bearer token for securing the /ibkr/* API endpoints"
+  type        = string
+  sensitive   = true
 }

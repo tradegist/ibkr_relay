@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Place an order via the remote-client HTTP API running on the droplet.
+# Place an order via the IBKR relay HTTPS API.
 #
 # Usage:
 #   ./order.sh  2 TSLA MKT          # buy 2 shares market
@@ -19,16 +19,23 @@ QTY="$1"
 SYMBOL="$2"
 ORDER_TYPE="$(echo "$3" | tr '[:lower:]' '[:upper:]')"
 
-# Get droplet IP from terraform
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DROPLET_IP=$(cd "$SCRIPT_DIR/terraform" && terraform output -raw droplet_ip 2>/dev/null)
 
-if [[ -z "$DROPLET_IP" ]]; then
-  echo "Error: Could not get droplet IP from terraform output"
+# Load API_TOKEN and VNC_DOMAIN from .env
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+  API_TOKEN=$(grep -E '^API_TOKEN=' "$SCRIPT_DIR/.env" | cut -d= -f2-)
+  VNC_DOMAIN=$(grep -E '^VNC_DOMAIN=' "$SCRIPT_DIR/.env" | cut -d= -f2-)
+fi
+
+if [[ -z "${API_TOKEN:-}" ]]; then
+  echo "Error: API_TOKEN not found in .env"
   exit 1
 fi
 
-SSH_KEY="$HOME/.ssh/ibkr-relay"
+if [[ -z "${VNC_DOMAIN:-}" ]]; then
+  echo "Error: VNC_DOMAIN not found in .env"
+  exit 1
+fi
 
 # Build JSON payload
 if [[ "$ORDER_TYPE" == "LMT" ]]; then
@@ -51,10 +58,7 @@ ABS_QTY="${QTY#-}"
 
 echo "Placing order: $ACTION $ABS_QTY $SYMBOL $ORDER_TYPE${LIMIT_PRICE:+ @ \$$LIMIT_PRICE}"
 
-# Post to the HTTP API via the webhook-relay container.
-# We pipe the JSON as stdin to avoid shell-quoting issues across SSH + docker exec.
-RESPONSE=$(echo "$JSON" | ssh -i "$SSH_KEY" "root@$DROPLET_IP" \
-  "docker compose -f /opt/ibkr-relay/docker-compose.yml exec -T webhook-relay \
-   python -c 'import urllib.request,sys,json; d=sys.stdin.read(); req=urllib.request.Request(\"http://localhost:5000/order\",data=d.encode(),headers={\"Content-Type\":\"application/json\"},method=\"POST\"); resp=urllib.request.urlopen(req,timeout=15); print(resp.read().decode())'" 2>&1)
-
-echo "$RESPONSE" | python3 -m json.tool 2>/dev/null || echo "$RESPONSE"
+curl -s -X POST "https://${VNC_DOMAIN}/ibkr/order" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
+  -d "$JSON" | python3 -m json.tool 2>/dev/null || echo "Request failed"

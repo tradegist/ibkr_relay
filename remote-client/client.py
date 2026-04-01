@@ -4,6 +4,7 @@ Exposes a small HTTP API on port 5000 for placing orders.
 """
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -25,6 +26,8 @@ IB_HOST = os.environ.get("IB_HOST", "ib-gateway")
 TRADING_MODE = os.environ.get("TRADING_MODE", "paper")
 IB_PORT = int(os.environ.get("IB_LIVE_PORT" if TRADING_MODE == "live" else "IB_PAPER_PORT", "4004"))
 CLIENT_ID = 1
+
+API_TOKEN = os.environ.get("API_TOKEN", "")
 
 INITIAL_RETRY_DELAY = 10
 MAX_RETRY_DELAY = 300
@@ -70,11 +73,25 @@ async def reconnect():
 API_PORT = int(os.environ.get("API_PORT", "5000"))
 
 
+@web.middleware
+async def auth_middleware(request: web.Request, handler):
+    """Verify Bearer token on all /ibkr/ routes."""
+    if request.path.startswith("/ibkr/"):
+        if not API_TOKEN:
+            log.error("API_TOKEN not configured — rejecting request")
+            return web.json_response({"error": "Server misconfigured"}, status=500)
+        auth = request.headers.get("Authorization", "")
+        if not hmac.compare_digest(auth, f"Bearer {API_TOKEN}"):
+            return web.json_response({"error": "Unauthorized"}, status=401)
+    return await handler(request)
+
+
 async def handle_order(request: web.Request) -> web.Response:
-    """POST /order — place a stock order.
+    """POST /ibkr/order — place a stock order.
 
     JSON body: {"quantity": int, "symbol": str, "orderType": "MKT"|"LMT", "limitPrice": float?}
     Positive quantity = BUY, negative = SELL.
+    Requires: Authorization: Bearer <API_TOKEN>
     """
     if not ib.isConnected():
         return web.json_response({"error": "Not connected to IB Gateway"}, status=503)
@@ -169,8 +186,8 @@ async def amain():
 
     log.info("Remote client ready. Starting HTTP API on port %d ...", API_PORT)
 
-    app = web.Application()
-    app.router.add_post("/order", handle_order)
+    app = web.Application(middlewares=[auth_middleware])
+    app.router.add_post("/ibkr/order", handle_order)
     app.router.add_get("/health", handle_health)
 
     runner = web.AppRunner(app)

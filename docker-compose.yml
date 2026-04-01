@@ -58,6 +58,7 @@ services:
       IB_HOST: ib-gateway
       IB_LIVE_PORT: "4003"
       IB_PAPER_PORT: "4004"
+      API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
     expose:
       - "5000"
 
