@@ -31,7 +31,7 @@ Four containers in a single Docker network:
 
 - **`ib-gateway`** — [`ghcr.io/gnzsnz/ib-gateway:stable`](https://github.com/gnzsnz/ib-gateway-docker). IBC automates login. VNC on port 5900 (raw), API on 4003 (live) / 4004 (paper).
 - **`novnc`** — [`theasp/novnc`](https://hub.docker.com/r/theasp/novnc). Browser-based VNC proxy on port 6080 for completing 2FA.
-- **`remote-client`** — Python image connected to IB Gateway via `ib_async`. Currently maintains a live connection; future: exposes an HTTP endpoint for placing orders.
+- **`remote-client`** — Python image connected to IB Gateway via `ib_async`. Exposes an HTTP API (port 5000, internal) for placing stock orders.
 - **`poller`** — Python image that polls the IBKR Flex Web Service every 10 minutes for trade confirmations and POSTs new fills to a webhook. Uses SQLite for deduplication. **Does not hold an IBKR session** — trade normally via web/mobile.
 
 ## Quick Start (Local Deploy)
@@ -114,15 +114,23 @@ When an order fills, the relay POSTs a JSON payload:
 {
   "event": "fill",
   "symbol": "AAPL",
+  "underlyingSymbol": "AAPL",
   "secType": "STK",
-  "exchange": "SMART",
-  "action": "BOT",
+  "exchange": "NYSE",
+  "op": "BUY",
   "quantity": 100.0,
-  "price": 178.52,
-  "time": "2026-04-01T14:30:00+00:00",
-  "orderId": 42,
-  "execId": "00018037.6...",
-  "account": "DU12345"
+  "avgPrice": 178.52,
+  "tradeDate": "2026-04-01",
+  "lastFillTime": "2026-04-01T14:30:00",
+  "orderTime": "2026-04-01T09:31:05",
+  "orderId": "1116304421",
+  "execIds": ["5663526621", "5663526623"],
+  "account": "UXXXXXXX",
+  "commission": -1.0,
+  "commissionCurrency": "USD",
+  "currency": "USD",
+  "orderType": "LMT",
+  "fillCount": 2
 }
 ```
 
@@ -142,6 +150,7 @@ If `TARGET_WEBHOOK_URL` is empty, the relay logs the payload to stdout (dry-run 
 ```
 ├── deploy.sh              # Local deployment script
 ├── destroy.sh             # Teardown script
+├── order.sh               # Place orders from the command line
 ├── poll-now.sh            # Trigger an immediate Flex poll
 ├── .env.example           # Configuration template
 ├── .github/workflows/
@@ -155,8 +164,8 @@ If `TARGET_WEBHOOK_URL` is empty, the relay logs the payload to stdout (dry-run 
 ├── docker-compose.yml     # Container orchestration
 ├── remote-client/
 │   ├── Dockerfile          # Python 3.11-slim image
-│   ├── requirements.txt    # ib_async
-│   └── client.py           # IB Gateway client (future: order placement)
+│   ├── requirements.txt    # ib_async, aiohttp
+│   └── client.py           # IB Gateway client + HTTP order API
 └── poller/
     ├── Dockerfile          # Python 3.11-slim image
     ├── requirements.txt    # httpx
@@ -188,6 +197,41 @@ Before deploying, create an Activity Flex Query in IBKR Client Portal:
 8. Go to **Flex Web Service Configuration** → enable and get the **Current Token** (use as `IBKR_FLEX_TOKEN`)
 
 > **Why Activity instead of Trade Confirmation?** Trade Confirmation queries are locked to "Today" only. Activity queries support a configurable lookback period, so if the droplet is offline for a few days the first poll after restart will catch all missed fills. The SQLite dedup prevents double-sending.
+
+## Placing Orders
+
+Place stock orders from your local machine using `order.sh`:
+
+```bash
+# Buy 2 shares of TSLA at market
+./order.sh 2 TSLA MKT
+
+# Sell 2 shares of TSLA at market
+./order.sh -2 TSLA MKT
+
+# Buy 2 shares of TSLA with a limit at $352.50
+./order.sh 2 TSLA LMT 352.5
+
+# Sell 2 shares of TSLA with a limit at $380
+./order.sh -2 TSLA LMT 380
+```
+
+Positive quantity = **BUY**, negative = **SELL**. The script SSHs into the droplet and calls the remote-client's HTTP API internally.
+
+Example response:
+
+```json
+{
+  "status": "PreSubmitted",
+  "orderId": 8,
+  "action": "BUY",
+  "symbol": "TSLA",
+  "quantity": 1,
+  "orderType": "MKT"
+}
+```
+
+> **Note**: Only US stocks (via SMART routing) are currently supported. The gateway must have `READ_ONLY_API=no` for orders to be accepted.
 
 ## On-Demand Poll
 
@@ -239,11 +283,11 @@ ssh -i ~/.ssh/ibkr-relay root@<DROPLET_IP> 'cd /opt/ibkr-relay && docker compose
 - [x] Terraform infrastructure (droplet, firewall, SSH key)
 - [x] Docker Compose orchestration (4 containers)
 - [x] Remote client connected to IB Gateway
+- [x] HTTP API for order placement (`order.sh`)
 - [x] Flex poller with SQLite dedup + webhook delivery
 - [x] On-demand poll script (`poll-now.sh`)
 - [x] Local deploy/destroy scripts
 - [x] GitHub Actions workflow
 - [x] Dry-run mode (log payloads when no webhook URL)
-- [ ] Remote client HTTP API for order placement
 - [ ] Health monitoring / alerting
 - [ ] Webhook endpoint (poller runs in dry-run mode until configured)

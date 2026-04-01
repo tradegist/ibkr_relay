@@ -10,6 +10,7 @@ services:
       RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
       AUTO_RESTART_TIME: "11:59 PM"
       EXISTING_SESSION_DETECTED_ACTION: primary
+      READ_ONLY_API: "no"
       TZ: ${TIME_ZONE:-America/New_York}
     expose:
       - "4003"
@@ -40,6 +41,8 @@ services:
       IB_HOST: ib-gateway
       IB_LIVE_PORT: "4003"
       IB_PAPER_PORT: "4004"
+    expose:
+      - "5000"
 
   poller:
     build: ./poller
