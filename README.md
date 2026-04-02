@@ -195,7 +195,7 @@ All operations are available via `make`. Run `make help` to see the full list:
   make pause       Snapshot droplet + delete (save costs)
   make resume      Restore droplet from snapshot
   make sync        Push .env + restart all services (or: make sync S=gateway)
-  make order       Place an order (e.g. make order Q=2 SYM=TSLA T=MKT)
+  make order       Place an order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE])
   make poll        Trigger an immediate Flex poll
   make logs        Stream poller logs (Ctrl+C to stop)
   make stats       Show container resource usage
@@ -205,13 +205,14 @@ All operations are available via `make`. Run `make help` to see the full list:
 Examples:
 
 ```bash
-make deploy                          # provision droplet + start containers
-make sync S=gateway                  # update IBKR credentials on the droplet
-make order Q=2 SYM=TSLA T=MKT       # buy 2 TSLA at market
-make order Q=-2 SYM=TSLA T=LMT P=380  # sell 2 TSLA limit $380
-make poll                            # trigger immediate Flex poll
-make logs                            # stream poller logs
-make logs S=webhook-relay            # stream relay logs
+make deploy                                    # provision droplet + start containers
+make sync S=gateway                            # update IBKR credentials on the droplet
+make order Q=2 SYM=TSLA T=MKT                 # buy 2 TSLA at market
+make order Q=-2 SYM=TSLA T=LMT P=380          # sell 2 TSLA limit $380
+make order Q=10 SYM=CSPX T=LMT P=590 CUR=EUR  # buy European ETF in EUR
+make poll                                      # trigger immediate Flex poll
+make logs                                      # stream poller logs
+make logs S=webhook-relay                      # stream relay logs
 make pause                           # snapshot + delete droplet
 make resume                          # restore from snapshot
 ```
@@ -293,6 +294,12 @@ Place stock orders from your local machine:
 
 # Sell 2 shares of TSLA with a limit at $380
 ./order.sh -2 TSLA LMT 380
+
+# Buy a European ETF in EUR
+./order.sh 10 CSPX LMT 590 EUR
+
+# Buy on a specific exchange
+./order.sh 10 CSPX LMT 590 EUR LSE
 ```
 
 Or via `make`:
@@ -300,6 +307,8 @@ Or via `make`:
 ```bash
 make order Q=2 SYM=TSLA T=MKT
 make order Q=-2 SYM=TSLA T=LMT P=380
+make order Q=10 SYM=CSPX T=LMT P=590 CUR=EUR
+make order Q=10 SYM=CSPX T=LMT P=590 CUR=EUR EX=LSE
 ```
 
 Positive quantity = **BUY**, negative = **SELL**. The script calls `https://<TRADE_DOMAIN>/ibkr/order` over HTTPS with Bearer token authentication.
@@ -311,6 +320,15 @@ curl -X POST https://trade.example.com/ibkr/order \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <API_TOKEN>" \
   -d '{"quantity": 2, "symbol": "TSLA", "orderType": "MKT"}'
+```
+
+For non-US stocks or ETFs, pass `exchange` and `currency` (default: `SMART` and `USD`):
+
+```bash
+curl -X POST https://trade.example.com/ibkr/order \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <API_TOKEN>" \
+  -d '{"quantity": 10, "symbol": "CSPX", "orderType": "LMT", "limitPrice": 590, "exchange": "SMART", "currency": "EUR"}'
 ```
 
 Example response:
@@ -326,7 +344,16 @@ Example response:
 }
 ```
 
-> **Note**: Only US stocks (via SMART routing) are currently supported. The gateway must have `READ_ONLY_API=no` for orders to be accepted.
+| Field        | Required | Default | Description                           |
+| ------------ | -------- | ------- | ------------------------------------- |
+| `quantity`   | Yes      | —       | Positive = BUY, negative = SELL       |
+| `symbol`     | Yes      | —       | Ticker symbol                         |
+| `orderType`  | Yes      | —       | `MKT` or `LMT`                        |
+| `limitPrice` | LMT only | —       | Limit price                           |
+| `exchange`   | No       | `SMART` | Exchange (SMART routes automatically) |
+| `currency`   | No       | `USD`   | Trading currency (EUR, GBP, etc.)     |
+
+> **Note**: The gateway must have `READ_ONLY_API=no` for orders to be accepted.
 
 ## On-Demand Poll
 
@@ -405,13 +432,15 @@ make logs S=webhook-relay
 ## Current Status
 
 - [x] Terraform infrastructure (droplet, firewall, SSH key)
-- [x] Docker Compose orchestration (4 containers)
+- [x] Docker Compose orchestration (5 containers)
 - [x] Remote client connected to IB Gateway
-- [x] HTTP API for order placement (`order.sh`)
+- [x] HTTP API for order placement (US + international stocks/ETFs)
 - [x] Flex poller with SQLite dedup + webhook delivery
-- [x] On-demand poll script (`poll-now.sh`)
-- [x] Local deploy/destroy scripts
+- [x] On-demand poll endpoint (`make poll` / HTTP API)
+- [x] Local deploy/destroy/pause/resume scripts
 - [x] GitHub Actions workflow
 - [x] Dry-run mode (log payloads when no webhook URL)
+- [x] Webhook endpoint (HMAC-SHA256 signed, batched payloads)
+- [x] HTTPS via Caddy + Let's Encrypt (separate VNC/Trade domains)
+- [x] Makefile CLI (`make deploy`, `make order`, etc.)
 - [ ] Health monitoring / alerting
-- [ ] Webhook endpoint (poller runs in dry-run mode until configured)

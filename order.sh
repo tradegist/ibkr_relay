@@ -2,16 +2,19 @@
 # Place an order via the IBKR relay HTTPS API.
 #
 # Usage:
-#   ./order.sh  2 TSLA MKT          # buy 2 shares market
-#   ./order.sh -2 TSLA MKT          # sell 2 shares market
-#   ./order.sh  2 TSLA LMT 352.5    # buy 2 shares limit $352.5
-#   ./order.sh -2 TSLA LMT 380      # sell 2 shares limit $380
+#   ./order.sh  2 TSLA MKT                    # buy 2 shares market (USD/SMART)
+#   ./order.sh -2 TSLA MKT                    # sell 2 shares market
+#   ./order.sh  2 TSLA LMT 352.5              # buy 2 shares limit $352.5
+#   ./order.sh -2 TSLA LMT 380                # sell 2 shares limit $380
+#   ./order.sh 10 CSPX LMT 590 EUR            # buy European ETF in EUR
+#   ./order.sh 10 CSPX LMT 590 EUR LSE        # buy on London Stock Exchange
 
 set -euo pipefail
 
 if [[ $# -lt 3 ]]; then
-  echo "Usage: $0 <quantity> <symbol> <MKT|LMT> [limitPrice]"
+  echo "Usage: $0 <quantity> <symbol> <MKT|LMT> [limitPrice] [currency] [exchange]"
   echo "  Positive quantity = BUY, negative = SELL"
+  echo "  currency defaults to USD, exchange defaults to SMART"
   exit 1
 fi
 
@@ -38,15 +41,21 @@ if [[ -z "${TRADE_DOMAIN:-}" ]]; then
 fi
 
 # Build JSON payload
+CURRENCY="${5:-USD}"
+EXCHANGE="${6:-SMART}"
+EXTRA_FIELDS=""
+[[ "$CURRENCY" != "USD" ]] && EXTRA_FIELDS="${EXTRA_FIELDS},\"currency\":\"${CURRENCY}\""
+[[ "$EXCHANGE" != "SMART" ]] && EXTRA_FIELDS="${EXTRA_FIELDS},\"exchange\":\"${EXCHANGE}\""
+
 if [[ "$ORDER_TYPE" == "LMT" ]]; then
   if [[ $# -lt 4 ]]; then
     echo "Error: limitPrice required for LMT orders"
     exit 1
   fi
   LIMIT_PRICE="$4"
-  JSON=$(printf '{"quantity":%s,"symbol":"%s","orderType":"LMT","limitPrice":%s}' "$QTY" "$SYMBOL" "$LIMIT_PRICE")
+  JSON=$(printf '{"quantity":%s,"symbol":"%s","orderType":"LMT","limitPrice":%s%s}' "$QTY" "$SYMBOL" "$LIMIT_PRICE" "$EXTRA_FIELDS")
 elif [[ "$ORDER_TYPE" == "MKT" ]]; then
-  JSON=$(printf '{"quantity":%s,"symbol":"%s","orderType":"MKT"}' "$QTY" "$SYMBOL")
+  JSON=$(printf '{"quantity":%s,"symbol":"%s","orderType":"MKT"%s}' "$QTY" "$SYMBOL" "$EXTRA_FIELDS")
 else
   echo "Error: orderType must be MKT or LMT (got: $ORDER_TYPE)"
   exit 1
@@ -56,7 +65,7 @@ ACTION="BUY"
 [[ "$QTY" -lt 0 ]] && ACTION="SELL"
 ABS_QTY="${QTY#-}"
 
-echo "Placing order: $ACTION $ABS_QTY $SYMBOL $ORDER_TYPE${LIMIT_PRICE:+ @ \$$LIMIT_PRICE}"
+echo "Placing order: $ACTION $ABS_QTY $SYMBOL $ORDER_TYPE${LIMIT_PRICE:+ @ \$$LIMIT_PRICE} ($CURRENCY/$EXCHANGE)"
 
 curl -s -X POST "https://${TRADE_DOMAIN}/ibkr/order" \
   -H "Content-Type: application/json" \

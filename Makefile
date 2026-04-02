@@ -18,8 +18,8 @@ resume: ## Restore droplet from snapshot
 sync: ## Push .env + restart all services (or: make sync S=gateway)
 	./sync-env.sh $(S)
 
-order: ## Place an order (e.g. make order Q=2 SYM=TSLA T=MKT)
-	./order.sh $(Q) $(SYM) $(T) $(P)
+order: ## Place an order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE])
+	./order.sh $(Q) $(SYM) $(T) $(P) $(CUR) $(EX)
 
 poll: ## Trigger an immediate Flex poll
 	./poll-now.sh

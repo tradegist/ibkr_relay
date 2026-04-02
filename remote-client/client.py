@@ -105,6 +105,8 @@ async def handle_order(request: web.Request) -> web.Response:
     symbol = body.get("symbol", "").upper().strip()
     order_type = body.get("orderType", "").upper().strip()
     limit_price = body.get("limitPrice")
+    exchange = body.get("exchange", "SMART").upper().strip()
+    currency = body.get("currency", "USD").upper().strip()
 
     if not quantity or not symbol:
         return web.json_response({"error": "quantity and symbol are required"}, status=400)
@@ -133,7 +135,7 @@ async def handle_order(request: web.Request) -> web.Response:
     else:
         return web.json_response({"error": f"Unsupported orderType: {order_type}"}, status=400)
 
-    contract = Stock(symbol, "SMART", "USD")
+    contract = Stock(symbol, exchange, currency)
 
     try:
         qualified = await ib.qualifyContractsAsync(contract)
