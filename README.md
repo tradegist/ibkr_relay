@@ -28,7 +28,8 @@ One-script deployment of a headless **Interactive Brokers Gateway** with two ser
 │  │  Ports: 80 (HTTP→redirect), 443 (HTTPS)  │                │
 │  └──────────────────────────────────────────┘                │
 │                                                              │
-│  Firewall: SSH from deployer IP, HTTP/HTTPS from anywhere    │
+│  Firewall: SSH from deployer IP only                         │
+│  HTTP/HTTPS open (Caddy auto-redirects HTTP → HTTPS)         │
 │  IBKR API ports are internal-only (not exposed)              │
 └──────────────────────────────────────────────────────────────┘
 ```
