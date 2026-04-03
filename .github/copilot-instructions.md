@@ -128,13 +128,13 @@ poller/
   routes/                  # HTTP API
     __init__.py            # Orchestrator: create_routes(), start_api_server()
     middlewares.py         # Auth middleware (Bearer token)
-    run.py                 # POST /ibkr/run-poll handler
+    run.py                 # POST /ibkr/poller/run handler
   Dockerfile
   requirements.txt
 ```
 
 - **`poller/poller/`** contains core logic: SQLite dedup, webhook delivery (HMAC-SHA256), Flex Web Service two-step fetch, and `poll_once()`.
-- **`poller/routes/`** contains the HTTP API for on-demand polls (`POST /ibkr/run-poll`).
+- **`poller/routes/`** contains the HTTP API for on-demand polls (`POST /ibkr/poller/run`).
 - **`poller/models.py`** is the source of truth for TypeScript types (`make types`).
 
 ## Models (Two Separate Files)

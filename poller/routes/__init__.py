@@ -25,7 +25,7 @@ def create_routes(
     app = web.Application(middlewares=[auth_middleware])
     app["db_conn"] = db_conn
     app["poll_lock"] = poll_lock
-    app.router.add_post("/ibkr/run-poll", handle_run_poll)
+    app.router.add_post("/ibkr/poller/run", handle_run_poll)
     return app
 
 

@@ -63,7 +63,7 @@ Optional fields: `limitPrice` (required for `LMT`), `currency` (default `USD`), 
 #### Trigger a poll
 
 ```
-POST /ibkr/run-poll
+POST /ibkr/poller/run
 ```
 
 No body required. Immediately polls the Flex Web Service for new fills and sends them to the configured webhook.
@@ -629,7 +629,7 @@ python3 -m cli poll --replay 3   # resend 3 trades
 You can also call the endpoint directly with `curl`:
 
 ```bash
-source .env && curl -s -X POST "https://${TRADE_DOMAIN}/ibkr/run-poll" \
+source .env && curl -s -X POST "https://${TRADE_DOMAIN}/ibkr/poller/run" \
   -H "Authorization: Bearer ${API_TOKEN}" \
   | python3 -m json.tool
 ```
@@ -637,7 +637,7 @@ source .env && curl -s -X POST "https://${TRADE_DOMAIN}/ibkr/run-poll" \
 You can optionally override the Flex token and query ID in the request body (defaults to the env vars if omitted):
 
 ```bash
-curl -s -X POST "https://trade.example.com/ibkr/run-poll" \
+curl -s -X POST "https://trade.example.com/ibkr/poller/run" \
   -H "Authorization: Bearer <API_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"ibkr_flex_token": "abc", "ibkr_flex_query_id": "123"}' \

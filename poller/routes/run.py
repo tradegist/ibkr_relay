@@ -1,4 +1,4 @@
-"""POST /ibkr/run-poll — trigger an on-demand poll."""
+"""POST /ibkr/poller/run — trigger an on-demand poll."""
 
 from __future__ import annotations
 
