@@ -173,6 +173,7 @@ JAVA_HEAP_SIZE=4096
 # 1. Clone and configure
 git clone https://github.com/OWNER/ibkr_relay.git
 cd ibkr_relay
+make setup        # Install dev dependencies (mypy, pydantic)
 cp .env.example .env
 # Edit .env with your values
 
