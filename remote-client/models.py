@@ -73,15 +73,29 @@ if __name__ == "__main__":
     import json
     import sys
 
-    # Combine request + response into a single schema with shared $defs
-    schema = PlaceOrderRequest.model_json_schema()
+    # Generate a combined schema with all types reachable from the root.
+    # json-schema-to-typescript only emits types it can reach, so we use
+    # anyOf to reference both PlaceOrderRequest and OrderResponse.
+    req_schema = PlaceOrderRequest.model_json_schema()
     resp_schema = OrderResponse.model_json_schema()
 
-    # Merge response $defs into request schema
-    defs = schema.setdefault("$defs", {})
+    defs = req_schema.get("$defs", {})
     defs.update(resp_schema.get("$defs", {}))
+
+    # Move both models into $defs
+    defs["PlaceOrderRequest"] = {
+        k: v for k, v in req_schema.items() if k != "$defs"
+    }
     defs["OrderResponse"] = {
         k: v for k, v in resp_schema.items() if k != "$defs"
+    }
+
+    schema = {
+        "$defs": defs,
+        "anyOf": [
+            {"$ref": "#/$defs/PlaceOrderRequest"},
+            {"$ref": "#/$defs/OrderResponse"},
+        ],
     }
 
     def _strip_titles(obj: object) -> None:

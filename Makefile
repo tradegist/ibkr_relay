@@ -35,9 +35,11 @@ test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2]
 	python3 -m cli test-webhook $(S)
 
 types: ## Regenerate TypeScript types from Pydantic models
-	python3 poller/models.py > types/webhook.schema.json
-	npx --yes json-schema-to-typescript types/webhook.schema.json > types/webhook.d.ts
-	@echo "Generated types/webhook.d.ts"
+	python3 poller/models.py > types/poller/webhook.schema.json
+	npx --yes json-schema-to-typescript types/poller/webhook.schema.json > types/poller/webhook.d.ts
+	python3 remote-client/models.py > types/http/order.schema.json
+	npx --yes json-schema-to-typescript types/http/order.schema.json > types/http/order.d.ts
+	@echo "Generated types/poller/webhook.d.ts + types/http/order.d.ts"
 
 test: ## Run unit tests
 	PYTHONPATH=.:poller python3 -m pytest poller/ -v
