@@ -1,0 +1,125 @@
+{
+  "$defs": {
+    "Fill": {
+      "properties": {
+        "event": {
+          "const": "fill",
+          "default": "fill",
+          "title": "Event",
+          "type": "string"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        },
+        "underlyingSymbol": {
+          "title": "Underlyingsymbol",
+          "type": "string"
+        },
+        "secType": {
+          "title": "Sectype",
+          "type": "string"
+        },
+        "exchange": {
+          "title": "Exchange",
+          "type": "string"
+        },
+        "op": {
+          "title": "Op",
+          "type": "string"
+        },
+        "quantity": {
+          "title": "Quantity",
+          "type": "number"
+        },
+        "avgPrice": {
+          "title": "Avgprice",
+          "type": "number"
+        },
+        "tradeDate": {
+          "title": "Tradedate",
+          "type": "string"
+        },
+        "lastFillTime": {
+          "title": "Lastfilltime",
+          "type": "string"
+        },
+        "orderTime": {
+          "title": "Ordertime",
+          "type": "string"
+        },
+        "orderId": {
+          "title": "Orderid",
+          "type": "string"
+        },
+        "execIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Execids",
+          "type": "array"
+        },
+        "account": {
+          "title": "Account",
+          "type": "string"
+        },
+        "commission": {
+          "title": "Commission",
+          "type": "number"
+        },
+        "commissionCurrency": {
+          "title": "Commissioncurrency",
+          "type": "string"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "orderType": {
+          "title": "Ordertype",
+          "type": "string"
+        },
+        "fillCount": {
+          "title": "Fillcount",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "symbol",
+        "underlyingSymbol",
+        "secType",
+        "exchange",
+        "op",
+        "quantity",
+        "avgPrice",
+        "tradeDate",
+        "lastFillTime",
+        "orderTime",
+        "orderId",
+        "execIds",
+        "account",
+        "commission",
+        "commissionCurrency",
+        "currency",
+        "orderType",
+        "fillCount"
+      ],
+      "title": "Fill",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "trades": {
+      "items": {
+        "$ref": "#/$defs/Fill"
+      },
+      "title": "Trades",
+      "type": "array"
+    }
+  },
+  "required": [
+    "trades"
+  ],
+  "title": "WebhookPayload",
+  "type": "object"
+}
