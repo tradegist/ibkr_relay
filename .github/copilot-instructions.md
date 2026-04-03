@@ -16,11 +16,12 @@
 
 ## Type Safety (MANDATORY)
 
+- **Python >= 3.11 is required.** The project uses `X | None` union syntax natively (no `from __future__ import annotations`). Docker images use `python:3.11-slim`. Local dev uses a `.venv` created from the latest Homebrew Python.
 - **Run `make typecheck` before copying ANY Python file to the droplet.** This is non-negotiable. If mypy fails, do NOT push the code.
 - **Run `make test` before assuming work is done and before copying ANY file to the droplet.** If tests fail, fix them first. Never deploy untested code.
 - **Run `make test` and `make typecheck` after every code change**, even refactors. Do not wait until the end — verify immediately.
 - When modifying any Python file (`.py`), always run `make test` and `make typecheck` and confirm both pass before deploying.
-- After modifying any model in `poller/models.py`, also run `make types` to regenerate the TypeScript definitions.
+- After modifying any model in `poller/models.py` or `remote-client/models.py`, also run `make types` to regenerate the TypeScript definitions.
 - **Always verify type safety by breaking it first.** After any refactor that touches types or model construction, deliberately introduce a type error (e.g. pass a `str` where `float` is expected), run `make typecheck`, and confirm it **fails**. Then revert and confirm it passes. Never assume mypy catches something — prove it.
 - **Avoid `dict[str, Any]` round-trips.** Never use `model_dump()` → `dict` → `Model(**data)` — mypy cannot type-check `**dict[str, Any]`. Use explicit keyword arguments or `model_copy(update=...)` instead.
 
@@ -29,6 +30,13 @@
 - **Use `Field(default_factory=list)`** for mutable defaults (`list`, `dict`). Never use bare `[]` or `{}` as default values — it risks shared mutable state.
 - **Use `ConfigDict(extra="forbid")`** on models that define an external contract (e.g. webhook payloads, API responses). This produces `additionalProperties: false` in the JSON Schema, keeping generated TypeScript types strict (no `[k: string]: unknown`).
 - **Docstrings on `parse_fills()` and similar claim "never raises"** — ensure the implementation matches. Wrap any call that can throw (e.g. `ET.fromstring()`) in try/except and return errors in the result tuple.
+
+## Local Development
+
+- **`.venv` is the project's virtual environment.** Created by `make setup` using Homebrew Python. All dev dependencies are installed there.
+- **Auto-activation** is configured in `~/.zshrc` via a `chpwd` hook — the venv activates automatically when `cd`'ing into the project directory.
+- **`make setup`** creates the `.venv` (if missing) and installs all dependencies (`requirements-dev.txt` + both service requirements).
+- **`.venv/` is gitignored** — never commit it.
 
 ## Dependency Management
 
@@ -146,7 +154,8 @@ This project has **two independent `models.py` files** — they serve different 
 | `poller/models.py`        | Webhook payloads (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell` — parsed from IBKR Flex XML                 |
 | `remote-client/models.py` | Order API (inbound)         | `ContractRequest`, `OrderRequest`, `PlaceOrderRequest`, `OrderResponse` — REST API types |
 
-- `poller/models.py` is the source of truth for TypeScript types (`make types`).
+- `poller/models.py` is the source of truth for `IbkrPoller` TypeScript types (`make types`).
+- `remote-client/models.py` is the source of truth for `IbkrHttp` TypeScript types (`make types`).
 - `remote-client/models.py` uses strict `Literal` types (`Action`, `OrderType`, `SecType`, `TimeInForce`) aligned with `ib_async` field names.
 - Both use `ConfigDict(extra="forbid")` for strict validation.
 
@@ -179,8 +188,26 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
 ## TypeScript Types
 
 - Types are published as `@tradegist/ibkr-types` (npm package in `types/`, not yet published).
-- **`make types`** regenerates `types/webhook.d.ts` and `types/webhook.schema.json` from `poller/models.py`.
-- `types/index.d.ts` is the barrel file re-exporting all types.
+- **Two namespaces**: `IbkrPoller` (webhook payload types) and `IbkrHttp` (order API types).
+- **`make types`** regenerates both from Pydantic models:
+  - `poller/models.py` → `types/poller/webhook.d.ts`
+  - `remote-client/models.py` → `types/http/order.d.ts`
+- **Structure:**
+  ```
+  types/
+    index.d.ts                 # Barrel: exports IbkrPoller, IbkrHttp namespaces
+    package.json               # @tradegist/ibkr-types
+    poller/
+      index.d.ts               # Re-exports: BuySell, WebhookPayload, Trade
+      webhook.d.ts             # Generated from poller/models.py
+      webhook.schema.json      # Intermediate JSON Schema
+    http/
+      index.d.ts               # Re-exports: PlaceOrderRequest, ContractRequest, OrderRequest, OrderResponse
+      order.d.ts               # Generated from remote-client/models.py
+      order.schema.json        # Intermediate JSON Schema
+  ```
+- **Usage:** `import { IbkrPoller, IbkrHttp } from "@tradegist/ibkr-types"`
+- Both `models.py` files have `__main__` blocks that output JSON Schema to stdout (used by the Makefile).
 
 ## Code Style
 
@@ -233,7 +260,7 @@ poller/                 # Flex poller service (see Poller Structure above)
   models.py             # Pydantic models: Fill, Trade, WebhookPayload, BuySell
 gateway-controller/     # CGI sidecar (Alpine, busybox httpd)
 novnc/index.html        # Custom VNC UI (Tailwind CSS)
-types/                  # @tradegist/ibkr-types npm package
+types/                  # @tradegist/ibkr-types npm package (IbkrPoller + IbkrHttp namespaces)
 docker-compose.test.yml # E2E test stack
 terraform/              # Infrastructure as code (DigitalOcean)
 ```

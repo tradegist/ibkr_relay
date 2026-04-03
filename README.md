@@ -52,13 +52,19 @@ POST /ibkr/order
 
 ```json
 {
-  "quantity": 2,
-  "symbol": "TSLA",
-  "orderType": "MKT"
+  "contract": {
+    "symbol": "TSLA",
+    "secType": "STK",
+    "exchange": "SMART",
+    "currency": "USD"
+  },
+  "order": {
+    "action": "BUY",
+    "totalQuantity": 2,
+    "orderType": "MKT"
+  }
 }
 ```
-
-Optional fields: `limitPrice` (required for `LMT`), `currency` (default `USD`), `exchange` (default `SMART`).
 
 #### Trigger a poll
 
@@ -176,7 +182,7 @@ JAVA_HEAP_SIZE=4096
 # 1. Clone and configure
 git clone https://github.com/OWNER/ibkr_relay.git
 cd ibkr_relay
-make setup        # Install dev dependencies (mypy, pydantic, pytest)
+make setup        # Create .venv and install dependencies
 cp .env.example .env
 # Edit .env with your values
 
@@ -236,10 +242,25 @@ Webhook payload and order placement types are available as a TypeScript package 
 
 ```
 types/
-  package.json         # @tradegist/ibkr-types
-  index.d.ts           # Barrel export
-  webhook.d.ts         # WebhookPayload, Trade, BuySell (auto-generated from Pydantic models)
-  http_client.ts       # OrderPayload, Operation, OrderType
+  index.d.ts                 # Barrel: exports IbkrPoller, IbkrHttp namespaces
+  package.json               # @tradegist/ibkr-types
+  poller/
+    index.d.ts               # Re-exports: BuySell, WebhookPayload, Trade
+    webhook.d.ts             # Generated from poller/models.py
+    webhook.schema.json      # Intermediate JSON Schema
+  http/
+    index.d.ts               # Re-exports: PlaceOrderRequest, ContractRequest, OrderRequest, OrderResponse
+    order.d.ts               # Generated from remote-client/models.py
+    order.schema.json        # Intermediate JSON Schema
+```
+
+Usage:
+
+```typescript
+import { IbkrPoller, IbkrHttp } from "@tradegist/ibkr-types";
+
+const payload: IbkrPoller.WebhookPayload = ...;
+const order: IbkrHttp.PlaceOrderRequest = ...;
 ```
 
 Types are auto-generated from the Pydantic models via `make types`. The package is not yet published to npm — the API is still evolving.
@@ -330,7 +351,7 @@ When orders fill, the relay POSTs a JSON payload with all trades batched into a 
 
 The `trades` array contains one `Trade` object per order (fills are aggregated by `orderId`). The `errors` array contains warnings about unknown XML attributes or parse errors — it is empty when everything parsed cleanly. See [Flex XML Parsing](#flex-xml-parsing) for details.
 
-Each `Trade` includes **all fields** from the IBKR Flex XML (see [`models.py`](models.py) for the full list). Fields not present in the XML default to `""` or `0.0`.
+Each `Trade` includes **all fields** from the IBKR Flex XML (see [`poller/models.py`](poller/models.py) for the full list). Fields not present in the XML default to `""` or `0.0`.
 
 The payload is signed with HMAC-SHA256. Verify using the `X-Signature-256` header:
 
@@ -434,8 +455,8 @@ After changing a variable in `.env`, restart only the affected service:
 
 ├── Makefile # CLI shortcuts (make deploy, make sync, etc.)
 ├── cli/ # Python CLI (replaces shell scripts)
-│ ├── **init**.py # Shared helpers (env loading, SSH, DO API, validation)
-│ ├── **main**.py # Entry point (python3 -m cli <command>)
+│ ├── __init__.py # Shared helpers (env loading, SSH, DO API, validation)
+│ ├── __main__.py # Entry point (python3 -m cli <command>)
 │ ├── deploy.py # Terraform init + apply
 │ ├── destroy.py # Terraform destroy
 │ ├── pause.py # Snapshot + delete droplet
@@ -465,6 +486,7 @@ After changing a variable in `.env`, restart only the affected service:
 │ ├── Dockerfile
 │   ├── requirements.txt       # ib_async, aiohttp
 │   ├── main.py                # Entrypoint (connection + HTTP server)
+│   ├── models.py              # Pydantic models (order API types)
 │   ├── client/                # IB Gateway client (namespace delegation)
 │   │   ├── __init__.py        # IBClient class (connection management)
 │   │   └── orders.py          # OrdersNamespace (place orders)
@@ -477,13 +499,30 @@ After changing a variable in `.env`, restart only the affected service:
 │       ├── conftest.py        # httpx fixtures
 │       ├── .env.test.example  # Template for paper credentials
 │       └── .env.test          # Your paper credentials (gitignored)
+├── poller/
+│   ├── Dockerfile
+│   ├── requirements.txt       # httpx, pydantic, aiohttp
+│   ├── main.py                # Entrypoint (polling loop + HTTP API)
+│   ├── models.py              # Pydantic models (Fill, Trade, WebhookPayload, BuySell)
+│   ├── poller/                # Core polling logic (package)
+│   │   ├── __init__.py        # SQLite dedup, webhook delivery, Flex fetch, poll_once()
+│   │   ├── flex_parser.py     # Flex XML parser (Activity + Trade Confirmation)
+│   │   ├── test_flex_parser.py # Tests for flex_parser
+│   │   └── test_poller.py     # Tests for poller core logic
+│   └── routes/                # HTTP API
+│       ├── __init__.py        # Route orchestrator (create_routes, start_api_server)
+│       ├── middlewares.py     # Auth middleware (Bearer token)
+│       └── run.py             # POST /ibkr/poller/run handler
 ├── docker-compose.test.yml    # E2E test stack (ib-gateway + webhook-relay)
-├── models.py # Pydantic models (Fill, Trade, WebhookPayload)
-└── poller/
-├── Dockerfile
-├── requirements.txt # httpx, pydantic
-├── flex_parser.py # Flex XML parser (Activity + Trade Confirmation)
-└── poller.py # Flex trade poller + webhook sender
+└── types/                     # @tradegist/ibkr-types npm package
+    ├── index.d.ts             # Barrel: exports IbkrPoller, IbkrHttp namespaces
+    ├── package.json
+    ├── poller/                # IbkrPoller namespace
+    │   ├── index.d.ts
+    │   └── webhook.d.ts       # Generated from poller/models.py
+    └── http/                  # IbkrHttp namespace
+        ├── index.d.ts
+        └── order.d.ts         # Generated from remote-client/models.py
 
 ```
 
@@ -564,16 +603,16 @@ You can also call the API directly:
 curl -X POST https://trade.example.com/ibkr/order \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <API_TOKEN>" \
-  -d '{"quantity": 2, "symbol": "TSLA", "orderType": "MKT"}'
+  -d '{"contract": {"symbol": "TSLA"}, "order": {"action": "BUY", "totalQuantity": 2, "orderType": "MKT"}}'
 ```
 
-For non-US stocks or ETFs, pass `exchange` and `currency` (default: `SMART` and `USD`):
+For non-US stocks or ETFs, pass `exchange` and `currency` in the `contract` object (default: `SMART` and `USD`):
 
 ```bash
 curl -X POST https://trade.example.com/ibkr/order \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <API_TOKEN>" \
-  -d '{"quantity": 10, "symbol": "CSPX", "orderType": "LMT", "limitPrice": 590, "exchange": "SMART", "currency": "EUR"}'
+  -d '{"contract": {"symbol": "CSPX", "exchange": "SMART", "currency": "EUR"}, "order": {"action": "BUY", "totalQuantity": 10, "orderType": "LMT", "lmtPrice": 590}}'
 ```
 
 Example response:
@@ -584,19 +623,12 @@ Example response:
   "orderId": 8,
   "action": "BUY",
   "symbol": "TSLA",
-  "quantity": 1,
+  "totalQuantity": 2,
   "orderType": "MKT"
 }
 ```
 
-| Field        | Required | Default | Description                           |
-| ------------ | -------- | ------- | ------------------------------------- |
-| `quantity`   | Yes      | —       | Positive = BUY, negative = SELL       |
-| `symbol`     | Yes      | —       | Ticker symbol                         |
-| `orderType`  | Yes      | —       | `MKT` or `LMT`                        |
-| `limitPrice` | LMT only | —       | Limit price                           |
-| `exchange`   | No       | `SMART` | Exchange (SMART routes automatically) |
-| `currency`   | No       | `USD`   | Trading currency (EUR, GBP, etc.)     |
+Field names mirror `ib_async` exactly (e.g. `lmtPrice`, `totalQuantity`, `secType`, `tif`, `outsideRth`). See [`remote-client/models.py`](remote-client/models.py) for the full schema.
 
 > **Note**: The gateway must have `READ_ONLY_API=no` for orders to be accepted.
 
@@ -736,7 +768,7 @@ The poller supports both **Activity Flex Queries** (`<Trade>` tags) and **Trade 
   | `settleDateTarget`   | `settleDateTarget`      | `settleDate`                 |
   | `tradeMoney`         | `tradeMoney`            | `amount`                     |
 
-- **All known fields are forwarded as-is** from the XML. The full list of supported fields is defined in [`models.py`](models.py). Unknown XML attributes are silently dropped but reported in the `errors` array of the webhook payload.
+- **All known fields are forwarded as-is** from the XML. The full list of supported fields is defined in [`poller/models.py`](poller/models.py). Unknown XML attributes are silently dropped but reported in the `errors` array of the webhook payload.
 
 - **Fills are aggregated into trades** by `orderId`. When an order has multiple fills:
   - `quantity` is the sum of all fills
