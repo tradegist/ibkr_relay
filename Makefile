@@ -1,4 +1,4 @@
-.PHONY: setup deploy destroy pause resume sync order poll poll2 test-webhook types test typecheck logs stats gateway ssh help
+.PHONY: setup deploy destroy pause resume sync order poll poll2 test-webhook types test typecheck e2e e2e-up e2e-down logs stats gateway ssh help
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
@@ -43,6 +43,25 @@ test: ## Run unit tests
 
 typecheck: ## Run mypy strict type checking
 	python3 -m mypy models.py poller/ cli/test_webhook.py
+
+E2E_ENV = remote-client/tests/e2e/.env.test
+E2E_COMPOSE = docker compose -f docker-compose.test.yml --env-file $(E2E_ENV)
+
+e2e-up: ## Start E2E test stack (IB Gateway + webhook-relay, paper account)
+	$(E2E_COMPOSE) up -d --build
+	@echo "Waiting for webhook-relay to connect to IB Gateway..."
+	@for i in $$(seq 1 30); do \
+		if curl -sf http://localhost:15000/health | grep -q '"connected": true'; then \
+			echo "Ready (connected to IB Gateway)"; break; \
+		fi; \
+		sleep 10; \
+	done
+
+e2e-down: ## Stop and remove E2E test stack
+	$(E2E_COMPOSE) down
+
+e2e: e2e-up ## Run E2E tests against local paper account (starts/stops stack)
+	python3 -m pytest remote-client/tests/e2e/ -v; ret=$$?; $(MAKE) e2e-down; exit $$ret
 
 logs: ## Stream poller logs (Ctrl+C to stop)
 	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/ibkr-relay} root@$$DROPLET_IP \

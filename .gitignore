@@ -1,4 +1,5 @@
 .env
+.env.test
 .pause-state
 terraform/.terraform/
 terraform/.terraform.lock.hcl

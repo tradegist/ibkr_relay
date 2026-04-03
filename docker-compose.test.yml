@@ -1,0 +1,46 @@
+# E2E test stack — paper account, no TLS, no poller, no VNC.
+# Usage: make e2e
+# Env file: remote-client/tests/e2e/.env.test
+
+name: ibkr-relay-test
+
+services:
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    restart: "no"
+    environment:
+      TWS_USERID: ${TWS_TEST_USER:?Set TWS_TEST_USER in .env}
+      TWS_PASSWORD: ${TWS_TEST_PASSWORD:?Set TWS_TEST_PASSWORD in .env}
+      TRADING_MODE: paper
+      TWOFA_TIMEOUT_ACTION: exit
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "no"
+      EXISTING_SESSION_DETECTED_ACTION: primary
+      READ_ONLY_API: "no"
+      TZ: ${TIME_ZONE:-America/New_York}
+    expose:
+      - "4004"
+
+  webhook-relay:
+    build: ./remote-client
+    restart: "no"
+    depends_on:
+      - ib-gateway
+    environment:
+      IB_HOST: ib-gateway
+      IB_PAPER_PORT: "4004"
+      TRADING_MODE: paper
+      API_TOKEN: test-token
+    ports:
+      - "15000:5000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
