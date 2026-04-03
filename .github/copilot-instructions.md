@@ -112,6 +112,31 @@ remote-client/
 - **Namespace delegation for IBClient** — `client.orders.place(contract_req, order_req)`. Add new namespaces (e.g. `holdings.py`, `quotes.py`) as needed.
 - **Route handlers access the client via `request.app["client"]`**, not closures.
 
+## Poller Structure
+
+The `poller/` service follows the same package pattern:
+
+```
+poller/
+  main.py                  # Entrypoint (polling loop + HTTP API startup)
+  models.py                # Pydantic models: Fill, Trade, WebhookPayload, BuySell
+  poller/                  # Core polling logic (package)
+    __init__.py            # SQLite dedup, webhook delivery, Flex fetch, poll_once()
+    flex_parser.py         # XML parser (Activity Flex + Trade Confirmation)
+    test_flex_parser.py    # Tests for flex_parser
+    test_poller.py         # Tests for poller core logic
+  routes/                  # HTTP API
+    __init__.py            # Orchestrator: create_routes(), start_api_server()
+    middlewares.py         # Auth middleware (Bearer token)
+    run.py                 # POST /ibkr/run-poll handler
+  Dockerfile
+  requirements.txt
+```
+
+- **`poller/poller/`** contains core logic: SQLite dedup, webhook delivery (HMAC-SHA256), Flex Web Service two-step fetch, and `poll_once()`.
+- **`poller/routes/`** contains the HTTP API for on-demand polls (`POST /ibkr/run-poll`).
+- **`poller/models.py`** is the source of truth for TypeScript types (`make types`).
+
 ## Models (Two Separate Files)
 
 This project has **two independent `models.py` files** — they serve different concerns and share no code:
@@ -159,7 +184,7 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
 
 ## Code Style
 
-- Python: `logging` module, f-strings, `aiohttp` for async HTTP in webhook-relay, `httpx` for sync HTTP in poller.
+- Python: `logging` module, f-strings, `aiohttp` for async HTTP in both webhook-relay and poller, `httpx` for sync HTTP client in poller.
 - CLI scripts: Python (`cli/` package), invoked via `python3 -m cli <command>` or `make`. Uses only stdlib (`subprocess`, `urllib.request`, `json`, `os`). No third-party dependencies.
 - Terraform: all secrets marked `sensitive = true` in `variables.tf`.
 
@@ -204,7 +229,7 @@ cli/                    # Python CLI (operator scripts)
   poll.py               # Trigger immediate Flex poll
 caddy/Caddyfile         # Reverse proxy config (uses env vars for domains)
 remote-client/          # webhook-relay service (see Remote Client Structure above)
-poller/                 # Flex poller service (Python, httpx)
+poller/                 # Flex poller service (see Poller Structure above)
   models.py             # Pydantic models: Fill, Trade, WebhookPayload, BuySell
 gateway-controller/     # CGI sidecar (Alpine, busybox httpd)
 novnc/index.html        # Custom VNC UI (Tailwind CSS)

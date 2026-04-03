@@ -1,10 +1,14 @@
 # Exclude everything, then allow only what the poller Dockerfile needs.
 
--
+*
 
 # Poller build needs these:
 
 !poller/models.py
 !poller/requirements.txt
-!poller/flex_parser.py
-!poller/poller.py
+!poller/main.py
+!poller/poller/**init**.py
+!poller/poller/flex_parser.py
+!poller/routes/**init**.py
+!poller/routes/middlewares.py
+!poller/routes/run.py

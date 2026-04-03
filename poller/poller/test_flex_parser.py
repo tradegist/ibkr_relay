@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from flex_parser import _dedup_id, aggregate_fills, parse_fills
+from poller.flex_parser import _dedup_id, aggregate_fills, parse_fills
 from models import BuySell, Fill, Trade
 
 
