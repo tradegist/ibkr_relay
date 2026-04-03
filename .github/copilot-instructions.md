@@ -1,5 +1,9 @@
 # IBKR Webhook Relay — Project Guidelines
 
+## Code Quality (MANDATORY)
+
+- **Always apply best practices by default.** Do not ask the user whether to follow a best practice — just do it. Use idiomatic Python naming, file organization, and patterns. When there is a clearly better approach (naming, structure, error handling), use it directly and explain why.
+
 ## Security Rules (MANDATORY)
 
 - **No hardcoded credentials** — passwords, API tokens, secrets, and keys MUST come from environment variables (`.env` file or `TF_VAR_*`). Never write real values in source files.
