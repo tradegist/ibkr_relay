@@ -1,5 +1,7 @@
 """IBKR Flex Poller — polls Trade Confirmation Flex Queries and fires webhooks."""
 
+from __future__ import annotations
+
 import hashlib
 import hmac
 import json
@@ -11,8 +13,11 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from typing import Any
 
 import httpx
+
+from models import Fill, WebhookPayload
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,7 +45,7 @@ USER_AGENT = "ibkr-relay/1.0"
 # ---------------------------------------------------------------------------
 # SQLite — deduplication of processed fills
 # ---------------------------------------------------------------------------
-def init_db():
+def init_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS processed_fills (
@@ -58,7 +63,7 @@ def init_db():
     return conn
 
 
-def get_last_poll_ts(conn):
+def get_last_poll_ts(conn: sqlite3.Connection) -> str:
     """Return the last processed trade timestamp, or empty string."""
     row = conn.execute(
         "SELECT value FROM metadata WHERE key = 'last_poll_ts'"
@@ -66,7 +71,7 @@ def get_last_poll_ts(conn):
     return row[0] if row else ""
 
 
-def set_last_poll_ts(conn, ts):
+def set_last_poll_ts(conn: sqlite3.Connection, ts: str) -> None:
     """Update the last processed trade timestamp."""
     conn.execute(
         "INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_poll_ts', ?)",
@@ -74,7 +79,7 @@ def set_last_poll_ts(conn, ts):
     )
 
 
-def get_processed_ids(conn, exec_ids):
+def get_processed_ids(conn: sqlite3.Connection, exec_ids: set[str]) -> set[str]:
     """Return the subset of exec_ids already in the DB."""
     if not exec_ids:
         return set()
@@ -86,7 +91,7 @@ def get_processed_ids(conn, exec_ids):
     return {r[0] for r in rows}
 
 
-def mark_processed(conn, exec_ids):
+def mark_processed(conn: sqlite3.Connection, exec_ids: list[str]) -> None:
     conn.executemany(
         "INSERT OR IGNORE INTO processed_fills (exec_id) VALUES (?)",
         [(eid,) for eid in exec_ids],
@@ -94,7 +99,7 @@ def mark_processed(conn, exec_ids):
     conn.commit()
 
 
-def prune_old(conn, days=30):
+def prune_old(conn: sqlite3.Connection, days: int = 30) -> None:
     conn.execute(
         "DELETE FROM processed_fills WHERE processed_at < datetime('now', ?)",
         (f"-{days} days",),
@@ -105,8 +110,8 @@ def prune_old(conn, days=30):
 # ---------------------------------------------------------------------------
 # Webhook delivery
 # ---------------------------------------------------------------------------
-def send_webhook(payload: dict) -> None:
-    body = json.dumps(payload, default=str, indent=2)
+def send_webhook(payload: WebhookPayload) -> None:
+    body = payload.model_dump_json(indent=2)
 
     if not TARGET_WEBHOOK_URL:
         log.info("Webhook payload (dry-run):\n%s", body)
@@ -142,7 +147,7 @@ API_PORT = int(os.environ.get("POLLER_API_PORT", "8000"))
 # ---------------------------------------------------------------------------
 # Flex Web Service
 # ---------------------------------------------------------------------------
-def fetch_flex_report(flex_token=None, flex_query_id=None):
+def fetch_flex_report(flex_token: str | None = None, flex_query_id: str | None = None) -> str | None:
     """Two-step Flex Web Service: SendRequest -> GetStatement."""
     token = flex_token or FLEX_TOKEN
     query_id = flex_query_id or FLEX_QUERY_ID
@@ -189,13 +194,13 @@ def fetch_flex_report(flex_token=None, flex_query_id=None):
             log.error("GetStatement failed: [%s] %s", err_code, msg)
             return None
 
-        return resp.text
+        return str(resp.text)
 
     log.error("Report generation timed out after retries")
     return None
 
 
-def parse_trades(xml_text):
+def parse_trades(xml_text: str) -> list[dict[str, Any]]:
     """Parse Flex Query XML for trade records."""
     root = ET.fromstring(xml_text)
     trades = []
@@ -249,7 +254,7 @@ def parse_trades(xml_text):
     return trades
 
 
-def _ibkr_dt_to_iso(dt_str):
+def _ibkr_dt_to_iso(dt_str: str) -> str:
     """Convert IBKR datetime 'YYYYMMDD;HHmmss' to ISO 'YYYY-MM-DDTHH:MM:SS'."""
     try:
         d, t = dt_str.split(";")
@@ -258,16 +263,16 @@ def _ibkr_dt_to_iso(dt_str):
         return dt_str
 
 
-def _ibkr_date_to_iso(d):
+def _ibkr_date_to_iso(d: str) -> str:
     """Convert IBKR date 'YYYYMMDD' to ISO 'YYYY-MM-DD'."""
     if len(d) == 8 and d.isdigit():
         return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
     return d
 
 
-def aggregate_by_order(trades):
+def aggregate_by_order(trades: list[dict[str, Any]]) -> list[Fill]:
     """Group individual fills by orderId, compute weighted avg price."""
-    groups = {}
+    groups: dict[str, list[dict[str, Any]]] = {}
     for t in trades:
         oid = t["orderId"]
         if not oid:
@@ -285,27 +290,27 @@ def aggregate_by_order(trades):
         total_commission = sum(f["commission"] for f in fills)
 
         first = fills[0]
-        results.append({
-            "event": "fill",
-            "symbol": first["symbol"],
-            "underlyingSymbol": first["underlyingSymbol"],
-            "secType": first["secType"],
-            "exchange": first["exchange"],
-            "op": first["op"],
-            "quantity": total_qty,
-            "avgPrice": round(avg_price, 8),
-            "tradeDate": _ibkr_date_to_iso(max(f["tradeDate"] for f in fills)),
-            "lastFillTime": _ibkr_dt_to_iso(max(f["tradeTime"] for f in fills)),
-            "orderTime": _ibkr_dt_to_iso(first["orderTime"]),
-            "orderId": order_id,
-            "execIds": [f["execId"] for f in fills],
-            "account": first["account"],
-            "commission": round(total_commission, 4),
-            "commissionCurrency": first["commissionCurrency"],
-            "currency": first["currency"],
-            "orderType": first["orderType"],
-            "fillCount": len(fills),
-        })
+        results.append(Fill(
+            event="fill",
+            symbol=first["symbol"],
+            underlyingSymbol=first["underlyingSymbol"],
+            secType=first["secType"],
+            exchange=first["exchange"],
+            op=first["op"],
+            quantity=total_qty,
+            avgPrice=round(avg_price, 8),
+            tradeDate=_ibkr_date_to_iso(max(f["tradeDate"] for f in fills)),
+            lastFillTime=_ibkr_dt_to_iso(max(f["tradeTime"] for f in fills)),
+            orderTime=_ibkr_dt_to_iso(first["orderTime"]),
+            orderId=order_id,
+            execIds=[f["execId"] for f in fills],
+            account=first["account"],
+            commission=round(total_commission, 4),
+            commissionCurrency=first["commissionCurrency"],
+            currency=first["currency"],
+            orderType=first["orderType"],
+            fillCount=len(fills),
+        ))
 
     return results
 
@@ -313,10 +318,16 @@ def aggregate_by_order(trades):
 # ---------------------------------------------------------------------------
 # Poll cycle
 # ---------------------------------------------------------------------------
-def poll_once(conn=None, flex_token=None, flex_query_id=None, debug=False, replay=0):
+def poll_once(
+    conn: sqlite3.Connection | None = None,
+    flex_token: str | None = None,
+    flex_query_id: str | None = None,
+    debug: bool = False,
+    replay: int = 0,
+) -> list[Fill]:
     """Run a single poll. Returns list of new aggregated orders."""
     close_conn = conn is None
-    if close_conn:
+    if conn is None:
         conn = init_db()
 
     try:
@@ -343,7 +354,7 @@ def poll_once(conn=None, flex_token=None, flex_query_id=None, debug=False, repla
         # Always show a sample of the first aggregated order for debugging
         all_orders = aggregate_by_order(all_trades)
         if all_orders:
-            log.info("Sample order (first):\n%s", json.dumps(all_orders[0], default=str, indent=2))
+            log.info("Sample order (first):\n%s", all_orders[0].model_dump_json(indent=2))
 
         # Pre-filter by timestamp watermark to reduce dedup work
         last_ts = get_last_poll_ts(conn)
@@ -372,7 +383,7 @@ def poll_once(conn=None, flex_token=None, flex_query_id=None, debug=False, repla
                 replay_trades = all_trades[:replay]
                 orders = aggregate_by_order(replay_trades)
                 log.info("Replay mode: resending %d fill(s) as %d order(s)", len(replay_trades), len(orders))
-                send_webhook({"trades": orders})
+                send_webhook(WebhookPayload(trades=orders))
                 return orders
             log.info("No new fills")
             return []
@@ -384,15 +395,15 @@ def poll_once(conn=None, flex_token=None, flex_query_id=None, debug=False, repla
         for order in orders:
             log.info(
                 "New fill: %s %s %s @ avgPrice %s (qty %s, %d fill(s))",
-                order["op"], order["symbol"], order["orderId"],
-                order["avgPrice"], order["quantity"], order["fillCount"],
+                order.op, order.symbol, order.orderId,
+                order.avgPrice, order.quantity, order.fillCount,
             )
 
         # Send a single webhook with all orders
-        send_webhook({"trades": orders})
+        send_webhook(WebhookPayload(trades=orders))
 
         # Mark all fills as processed after successful webhook
-        all_new_exec_ids = [eid for o in orders for eid in o["execIds"]]
+        all_new_exec_ids = [eid for o in orders for eid in o.execIds]
         mark_processed(conn, all_new_exec_ids)
 
         # Update timestamp watermark to the latest trade time
@@ -418,10 +429,10 @@ _db_conn = None
 
 
 class PollHandler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
+    def log_message(self, fmt: str, *args: object) -> None:
         log.debug(fmt, *args)
 
-    def do_POST(self):
+    def do_POST(self) -> None:
         if self.path != "/ibkr/run-poll":
             self._reply(404, {"error": "Not found"})
             return
@@ -454,14 +465,14 @@ class PollHandler(BaseHTTPRequestHandler):
         try:
             orders = poll_once(_db_conn, flex_token=flex_token, flex_query_id=flex_query_id, replay=replay)
             result = orders if isinstance(orders, list) else []
-            self._reply(200, {"trades": result})
+            self._reply(200, {"trades": [o.model_dump() for o in result]})
         except Exception as exc:
             log.exception("On-demand poll failed")
             self._reply(500, {"error": str(exc)})
         finally:
             _poll_lock.release()
 
-    def _reply(self, status, body):
+    def _reply(self, status: int, body: dict[str, Any]) -> None:
         data = json.dumps(body, default=str, indent=2).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -470,7 +481,7 @@ class PollHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def start_api_server():
+def start_api_server() -> None:
     server = HTTPServer(("0.0.0.0", API_PORT), PollHandler)
     log.info("Poll API listening on 0.0.0.0:%d", API_PORT)
     server.serve_forever()
@@ -479,7 +490,7 @@ def start_api_server():
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
-def main_loop():
+def main_loop() -> None:
     """Continuous polling loop with HTTP API for on-demand polls."""
     global _db_conn
     if not FLEX_TOKEN or not FLEX_QUERY_ID:
@@ -508,7 +519,7 @@ def main_loop():
         time.sleep(POLL_INTERVAL)
 
 
-def main_once():
+def main_once() -> None:
     """Single on-demand poll, then exit."""
     if not FLEX_TOKEN or not FLEX_QUERY_ID:
         log.error("IBKR_FLEX_TOKEN and IBKR_FLEX_QUERY_ID must be set")

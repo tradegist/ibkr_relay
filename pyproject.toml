@@ -1,0 +1,21 @@
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = "models"
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["poller.poller", "cli.test_webhook"]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+module = "httpx"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "cli"
+ignore_errors = true

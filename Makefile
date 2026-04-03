@@ -1,4 +1,4 @@
-.PHONY: deploy destroy pause resume sync order poll poll2 test-webhook logs stats gateway ssh help
+.PHONY: deploy destroy pause resume sync order poll poll2 test-webhook types typecheck logs stats gateway ssh help
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
@@ -29,6 +29,14 @@ poll2: ## Trigger an immediate Flex poll (second poller)
 
 test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2])
 	python3 -m cli test-webhook $(S)
+
+types: ## Regenerate TypeScript types from Pydantic models
+	python3 models.py > types/webhook-payload.schema.json
+	npx --yes json-schema-to-typescript types/webhook-payload.schema.json > types/webhook-payload.d.ts
+	@echo "Generated types/webhook-payload.d.ts"
+
+typecheck: ## Run mypy strict type checking
+	mypy models.py poller/poller.py cli/test_webhook.py
 
 logs: ## Stream poller logs (Ctrl+C to stop)
 	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/ibkr-relay} root@$$DROPLET_IP \
