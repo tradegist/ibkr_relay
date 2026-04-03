@@ -72,7 +72,7 @@ No body required. Immediately polls the Flex Web Service for new fills and sends
 GET /health
 ```
 
-Returns `{"connected": true}` when the relay has an active connection to IB Gateway, `false` during reconnection (e.g. after a gateway restart). No auth required.
+Returns `{"connected": true, "tradingMode": "paper"}` when the relay has an active connection to IB Gateway, `false` during reconnection (e.g. after a gateway restart). No auth required.
 
 ## Architecture
 
