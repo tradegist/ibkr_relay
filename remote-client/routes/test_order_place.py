@@ -8,9 +8,15 @@ from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
 from routes import create_routes
 
 # Patch API_TOKEN at module level in middlewares so auth passes with "test-token".
-_patch_token = patch("routes.middlewares.API_TOKEN", "test-token")
-_patch_token.start()
+_patcher = patch("routes.middlewares.API_TOKEN", "test-token")
 
+
+def setUpModule() -> None:
+    _patcher.start()
+
+
+def tearDownModule() -> None:
+    _patcher.stop()
 
 
 def _make_client(connected: bool = True) -> MagicMock:
