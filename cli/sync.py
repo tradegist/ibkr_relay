@@ -47,6 +47,9 @@ def _run_checks(skip_e2e):
     print("Running type checks...")
     subprocess.run(["make", "typecheck"], check=True, cwd=PROJECT_DIR)
 
+    print("Running linter...")
+    subprocess.run(["make", "lint"], check=True, cwd=PROJECT_DIR)
+
     print("Running unit tests...")
     subprocess.run(["make", "test"], check=True, cwd=PROJECT_DIR)
 
