@@ -26,17 +26,20 @@ async def handle_run_poll(request: web.Request) -> web.Response:
     except Exception:
         pass  # no body or malformed — use env defaults
 
-    if poll_lock.locked():
+    try:
+        await asyncio.wait_for(poll_lock.acquire(), timeout=0)
+    except asyncio.TimeoutError:
         return web.json_response({"error": "Poll already in progress"}, status=409)
 
-    async with poll_lock:
-        try:
-            trades = await asyncio.to_thread(
-                poll_once, db_conn,
-                flex_token=flex_token, flex_query_id=flex_query_id, replay=replay,
-            )
-            result = trades if isinstance(trades, list) else []
-            return web.json_response({"trades": [t.model_dump() for t in result]})
-        except Exception as exc:
-            log.exception("On-demand poll failed")
-            return web.json_response({"error": str(exc)}, status=500)
+    try:
+        trades = await asyncio.to_thread(
+            poll_once, db_conn,
+            flex_token=flex_token, flex_query_id=flex_query_id, replay=replay,
+        )
+        result = trades if isinstance(trades, list) else []
+        return web.json_response({"trades": [t.model_dump() for t in result]})
+    except Exception as exc:
+        log.exception("On-demand poll failed")
+        return web.json_response({"error": str(exc)}, status=500)
+    finally:
+        poll_lock.release()

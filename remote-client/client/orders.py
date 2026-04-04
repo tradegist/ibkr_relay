@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from ib_async import IB, Contract, LimitOrder, MarketOrder
+from ib_async import IB, Contract, LimitOrder, MarketOrder, Order
 
 from models import ContractRequest, OrderRequest, OrderResponse
 
@@ -25,10 +25,10 @@ class OrdersNamespace:
 
         Raises ValueError for invalid input, RuntimeError for IB errors.
         """
-        if order_req.orderType == "LMT" and order_req.lmtPrice is None:
-            raise ValueError("lmtPrice required for LMT orders")
-
+        ib_order: Order
         if order_req.orderType == "LMT":
+            if order_req.lmtPrice is None:
+                raise ValueError("lmtPrice required for LMT orders")
             ib_order = LimitOrder(
                 order_req.action,
                 order_req.totalQuantity,

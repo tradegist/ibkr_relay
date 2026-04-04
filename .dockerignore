@@ -7,8 +7,8 @@
 !poller/models.py
 !poller/requirements.txt
 !poller/main.py
-!poller/poller/**init**.py
+!poller/poller/__init__.py
 !poller/poller/flex_parser.py
-!poller/routes/**init**.py
+!poller/routes/__init__.py
 !poller/routes/middlewares.py
 !poller/routes/run.py

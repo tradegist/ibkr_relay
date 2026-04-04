@@ -22,7 +22,7 @@ log = logging.getLogger("remote-client")
 API_PORT = int(os.environ.get("API_PORT", "5000"))
 
 
-async def amain():
+async def amain() -> None:
     client = IBClient()
 
     log.info("IBKR Remote Client starting (mode=%s)", os.environ.get("TRADING_MODE", "paper"))

@@ -5,6 +5,7 @@ import logging
 import os
 
 from aiohttp import web
+from aiohttp.typedefs import Handler
 
 log = logging.getLogger("routes")
 
@@ -12,7 +13,7 @@ API_TOKEN = os.environ.get("API_TOKEN", "")
 
 
 @web.middleware
-async def auth_middleware(request: web.Request, handler):
+async def auth_middleware(request: web.Request, handler: Handler) -> web.StreamResponse:
     """Verify Bearer token on all /ibkr/ routes."""
     if request.path.startswith("/ibkr/"):
         if not API_TOKEN:

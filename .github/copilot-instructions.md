@@ -21,6 +21,7 @@
 - **Run `make test` before assuming work is done and before copying ANY file to the droplet.** If tests fail, fix them first. Never deploy untested code.
 - **Run `make test` and `make typecheck` after every code change**, even refactors. Do not wait until the end — verify immediately.
 - When modifying any Python file (`.py`), always run `make test` and `make typecheck` and confirm both pass before deploying.
+- **Every Python file must be covered by `make typecheck`.** When adding a new Python service, package, or standalone script, immediately add it to the mypy invocation in the Makefile. No Python file may exist outside mypy's scope.
 - After modifying any model in `poller/models.py` or `remote-client/models.py`, also run `make types` to regenerate the TypeScript definitions.
 - **Always verify type safety by breaking it first.** After any refactor that touches types or model construction, deliberately introduce a type error (e.g. pass a `str` where `float` is expected), run `make typecheck`, and confirm it **fails**. Then revert and confirm it passes. Never assume mypy catches something — prove it.
 - **Avoid `dict[str, Any]` round-trips.** Never use `model_dump()` → `dict` → `Model(**data)` — mypy cannot type-check `**dict[str, Any]`. Use explicit keyword arguments or `model_copy(update=...)` instead.
@@ -30,6 +31,15 @@
 - **Use `Field(default_factory=list)`** for mutable defaults (`list`, `dict`). Never use bare `[]` or `{}` as default values — it risks shared mutable state.
 - **Use `ConfigDict(extra="forbid")`** on models that define an external contract (e.g. webhook payloads, API responses). This produces `additionalProperties: false` in the JSON Schema, keeping generated TypeScript types strict (no `[k: string]: unknown`).
 - **Docstrings on `parse_fills()` and similar claim "never raises"** — ensure the implementation matches. Wrap any call that can throw (e.g. `ET.fromstring()`) in try/except and return errors in the result tuple.
+
+## Concurrency Safety (MANDATORY)
+
+- **Assume concurrency by default.** Both services are async (aiohttp). Any handler can be interrupted at an `await`. When writing new code, always consider what happens if two requests arrive at the same time.
+- **Always be wary of race conditions.** Before merging any code that touches shared state, ask: "Can two callers interleave here? What breaks if they do?"
+- **Never use TOCTOU (Time of Check, Time of Use) patterns with locks.** Do NOT check `lock.locked()` and then `async with lock:` — another coroutine can acquire the lock between the check and the acquisition, defeating the guard. This is a race condition.
+- **Lock acquisition must BE the check.** Use `asyncio.wait_for(lock.acquire(), timeout=0)` with `try/finally: lock.release()` to fail-fast, or accept that `async with lock:` will queue. Never separate "is it locked?" from "acquire it."
+- **This applies to all shared-state guards** — locks, database transactions, file locks, semaphores, balance checks. If the action is "check a condition, then act on it," both steps must be atomic.
+- **Financial operations require extra scrutiny.** Any code path that places orders, moves money, or modifies account state must be reviewed for: race conditions, double-execution, partial failure (what if it crashes between two steps?), and idempotency.
 
 ## Local Development
 

@@ -351,7 +351,7 @@ When orders fill, the relay POSTs a JSON payload with all trades batched into a 
 
 The `trades` array contains one `Trade` object per order (fills are aggregated by `orderId`). The `errors` array contains warnings about unknown XML attributes or parse errors — it is empty when everything parsed cleanly. See [Flex XML Parsing](#flex-xml-parsing) for details.
 
-Each `Trade` includes **all fields** from the IBKR Flex XML (see [`poller/models.py`](poller/models.py) for the full list). Fields not present in the XML default to `""` or `0.0`.
+Each `Trade` includes **all fields** from the IBKR Flex XML (see [`poller/models.py`](poller/models.py) for the full list). Most fields not present in the XML default to `""` or `0.0`, but `buySell` must be present; rows missing it are skipped and reported in `errors`.
 
 The payload is signed with HMAC-SHA256. Verify using the `X-Signature-256` header:
 

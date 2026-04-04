@@ -5,6 +5,7 @@ requires-python = ">=3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+explicit_package_bases = true
 
 [[tool.mypy.overrides]]
 module = "httpx"

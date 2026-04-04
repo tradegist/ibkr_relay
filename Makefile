@@ -46,6 +46,7 @@ test: ## Run unit tests
 
 typecheck: ## Run mypy strict type checking
 	MYPYPATH=poller python3 -m mypy poller/ cli/test_webhook.py
+	MYPYPATH=remote-client python3 -m mypy remote-client/
 
 E2E_ENV = remote-client/tests/e2e/.env.test
 E2E_COMPOSE = docker compose -f docker-compose.test.yml --env-file $(E2E_ENV)
