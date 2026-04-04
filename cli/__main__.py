@@ -18,6 +18,10 @@ def main():
 
     p = sub.add_parser("sync", help="Push .env + restart services")
     p.add_argument("services", nargs="*", help="Services to restart (default: all)")
+    p.add_argument("--local-files", action="store_true",
+                   help="git push + git pull on droplet before restart (implies --build)")
+    p.add_argument("--build", action="store_true",
+                   help="Rebuild Docker images before restarting")
 
     p = sub.add_parser("poll", help="Trigger an immediate Flex poll")
     p.add_argument("poller", nargs="?", default="1", choices=["1", "2"],

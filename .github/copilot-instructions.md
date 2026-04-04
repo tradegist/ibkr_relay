@@ -166,10 +166,10 @@ poller/
 
 This project has **two independent model files** with unique names to avoid import ambiguity:
 
-| File                                   | Domain                      | Contains                                                                                 |
-| -------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------- |
-| `poller/models_poller.py`              | Webhook payloads (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell` — parsed from IBKR Flex XML                 |
-| `remote-client/models_remote_client.py`| Order API (inbound)         | `ContractRequest`, `OrderRequest`, `PlaceOrderRequest`, `OrderResponse` — REST API types |
+| File                                    | Domain                      | Contains                                                                                 |
+| --------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------- |
+| `poller/models_poller.py`               | Webhook payloads (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell` — parsed from IBKR Flex XML                 |
+| `remote-client/models_remote_client.py` | Order API (inbound)         | `ContractRequest`, `OrderRequest`, `PlaceOrderRequest`, `OrderResponse` — REST API types |
 
 - **Unique filenames** (`models_poller.py`, `models_remote_client.py`) prevent import collisions when both `poller/` and `remote-client/` are on `sys.path` (via the `.pth` file). Use `from models_poller import ...` and `from models_remote_client import ...` everywhere.
 - `models_poller.py` is the source of truth for `IbkrPoller` TypeScript types (`make types`).
@@ -240,6 +240,7 @@ All commands available via `make` or `python3 -m cli <command>`:
 ```bash
 make deploy    # Terraform init + apply (reads .env)
 make sync      # Push .env to droplet + restart services
+make sync LOCAL_FILES=1  # git push/pull + rebuild + restart (full code deploy)
 make destroy   # Terraform destroy
 make pause     # Snapshot + delete droplet (save costs)
 make resume    # Restore from snapshot
@@ -253,6 +254,7 @@ Direct CLI (no Make required, works on Windows):
 ```bash
 python3 -m cli deploy
 python3 -m cli sync gateway
+python3 -m cli sync --local-files
 python3 -m cli order 2 TSLA MKT
 python3 -m cli poll 2
 ```

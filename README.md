@@ -409,7 +409,7 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make destroy     Permanently destroy all infrastructure
   make pause       Snapshot droplet + delete (save costs)
   make resume      Restore droplet from snapshot
-  make sync        Push .env + restart all services (or: make sync S=gateway)
+  make sync        Push .env + restart (S=gateway B=1 LOCAL_FILES=1)
   make order       Place a stock order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE] [TIF=GTC] [RTH=1])
   make poll        Trigger an immediate Flex poll (V=1 verbose, DEBUG=1 XML, REPLAY=N resend)
   make test-webhook Send sample trades to webhook endpoint
@@ -447,7 +447,11 @@ python3 -m cli destroy
 
 ```bash
 make deploy                                    # provision droplet + start containers
-make sync S=gateway                            # update IBKR credentials on the droplet
+make sync                                      # push .env + restart all services
+make sync S=gateway                            # push .env + restart one service
+make sync B=1                                  # push .env + rebuild images + restart
+make sync LOCAL_FILES=1                        # git push/pull + rebuild + restart (full deploy)
+make sync LOCAL_FILES=1 S=poller               # full deploy, rebuild only poller
 make order Q=2 SYM=TSLA T=MKT                  # buy 2 TSLA at market
 make order Q=-2 SYM=TSLA T=LMT P=380           # sell 2 TSLA limit $380
 make order Q=10 SYM=CSPX T=LMT P=590 CUR=EUR   # buy European ETF in EUR
@@ -478,6 +482,30 @@ After changing a variable in `.env`, restart only the affected service:
 | `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, `TARGET_WEBHOOK_URL`, `WEBHOOK_SECRET`, `WEBHOOK_HEADER_NAME/VALUE`, `POLL_INTERVAL_SECONDS` | poller        | `make sync S=poller`  |
 | `VNC_DOMAIN`, `TRADE_DOMAIN`                                                                                                          | caddy         | `make sync S=caddy`   |
 | Multiple services or unsure                                                                                                           | all           | `make sync`           |
+
+### Syncing code changes
+
+`make sync` only pushes `.env` and restarts containers — it does **not** update source files on the droplet. When you change Python code, Dockerfiles, or Compose config, use `LOCAL_FILES=1` to sync everything:
+
+```bash
+make sync LOCAL_FILES=1
+```
+
+This will:
+
+1. Verify you're on `main` (aborts on feature branches)
+2. Verify working tree is clean (aborts on uncommitted changes)
+3. `git push` locally
+4. `git pull` on the droplet
+5. Push `.env`
+6. `docker compose up -d --build --force-recreate`
+
+If you forked this repo, pull upstream changes first, then deploy:
+
+```bash
+git pull upstream main   # merge latest changes from upstream
+make sync LOCAL_FILES=1  # deploy to your droplet
+```
 
 ## Project Structure
 
