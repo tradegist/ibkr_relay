@@ -11,7 +11,7 @@ services:
     environment:
       API_TOKEN: test-token
     ports:
-      - "15000:5000"
+      - "15010:5000"
     volumes:
       - ./remote-client:/app
     healthcheck:
@@ -35,7 +35,7 @@ services:
       API_TOKEN: test-token
       POLLER_API_PORT: "8000"
     ports:
-      - "15001:8000"
+      - "15011:8000"
     volumes:
       - ./poller:/app
     healthcheck:

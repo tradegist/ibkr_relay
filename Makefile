@@ -27,8 +27,8 @@ pause: ## Snapshot droplet + delete (save costs)
 resume: ## Restore droplet from snapshot
 	$(PYTHON) -m cli resume
 
-sync: ## Push .env + restart (S=gateway B=1 LOCAL_FILES=1)
-	$(PYTHON) -m cli sync $(S) $(if $(LOCAL_FILES),--local-files) $(if $(B),--build)
+sync: ## Push .env + restart (S=gateway B=1 LOCAL_FILES=1 SKIP_E2E=1)
+	$(PYTHON) -m cli sync $(S) $(if $(LOCAL_FILES),--local-files) $(if $(B),--build) $(if $(SKIP_E2E),--skip-e2e)
 
 order: ## Place a stock order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE] [TIF=GTC] [RTH=1] [ENV=local])
 	$(CLI_RELAY_ENV) $(PYTHON) -m cli order $(Q) $(SYM) $(T) $(P) $(CUR) $(EX) $(if $(TIF),--tif $(TIF)) $(if $(RTH),--outside-rth)
@@ -68,21 +68,21 @@ local-down: ## Stop local stack
 	$(LOCAL_COMPOSE) down
 
 e2e-up: ## Start E2E test stack (IB Gateway + webhook-relay + poller)
-	@if curl -sf http://localhost:15000/health | grep -q '"connected": true' && \
-	    curl -sf http://localhost:15001/health | grep -q '"status": "ok"'; then \
+	@if curl -sf http://localhost:15010/health | grep -q '"connected": true' && \
+	    curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 		echo "Stack already running and connected"; \
 	else \
 		$(E2E_COMPOSE) up -d --build; \
 		echo "Waiting for webhook-relay to connect to IB Gateway..."; \
 		for i in $$(seq 1 12); do \
-			if curl -sf http://localhost:15000/health | grep -q '"connected": true'; then \
+			if curl -sf http://localhost:15010/health | grep -q '"connected": true'; then \
 				echo "webhook-relay ready"; break; \
 			fi; \
 			sleep 10; \
 		done; \
 		echo "Waiting for poller..."; \
 		for i in $$(seq 1 10); do \
-			if curl -sf http://localhost:15001/health | grep -q '"status": "ok"'; then \
+			if curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 				echo "poller ready"; break; \
 			fi; \
 			sleep 3; \
@@ -97,8 +97,8 @@ e2e-run: ## Run E2E tests (stack must be up)
 
 e2e: ## Run E2E tests against local paper account (starts/stops stack)
 	@was_up=false; \
-	if curl -sf http://localhost:15000/health | grep -q '"connected": true' && \
-	   curl -sf http://localhost:15001/health | grep -q '"status": "ok"'; then \
+	if curl -sf http://localhost:15010/health | grep -q '"connected": true' && \
+	   curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 		was_up=true; \
 	fi; \
 	$(MAKE) e2e-up && $(MAKE) e2e-run; ret=$$?; \

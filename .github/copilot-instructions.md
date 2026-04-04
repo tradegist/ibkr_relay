@@ -108,7 +108,7 @@ Caddy reads `VNC_DOMAIN` and `TRADE_DOMAIN` from env vars — the Caddyfile uses
 - **`docker-compose.test.yml`** at project root defines the test stack (ib-gateway + webhook-relay only, no Caddy/poller/VNC).
 - **`make e2e`** starts the stack, waits for connection, runs pytest, then tears down. Always cleans up, even on test failure.
 - **`make e2e-up` / `make e2e-down`** for manual stack management during debugging.
-- **Test API runs on `localhost:15000`** with hardcoded token `test-token`.
+- **Test API runs on `localhost:15010`** with hardcoded token `test-token`.
 - **No healthcheck on `ib-gateway`** — the `IBClient.connect()` handles retry with exponential backoff, same as production.
 - **Paper accounts require no 2FA**, so the E2E stack is fully automated.
 

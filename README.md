@@ -238,7 +238,7 @@ End-to-end tests run against a local Docker stack with a real IB Gateway connect
    make e2e-down     # stop and remove containers
    ```
 
-The test stack exposes the API on `http://localhost:15000` with a hardcoded token (`test-token`). The gateway typically connects within ~20 seconds.
+The test stack exposes the API on `http://localhost:15010` with a hardcoded token (`test-token`). The gateway typically connects within ~20 seconds.
 
 ### Local production stack
 
@@ -494,13 +494,24 @@ After changing a variable in `.env`, restart only the affected service:
 make sync LOCAL_FILES=1
 ```
 
-This will:
+This runs a full pre-deploy pipeline before anything reaches the droplet:
 
 1. Verify you're on `main` (aborts on feature branches)
 2. Verify working tree is clean (aborts on uncommitted changes)
-3. `rsync` project files to the droplet (respects `.gitignore`, excludes `.env`)
-4. Push `.env`
-5. `docker compose up -d --build --force-recreate`
+3. `make typecheck` — mypy strict type checking
+4. `make test` — all unit tests
+5. `make e2e-run` — E2E tests (requires `make e2e-up` first)
+6. `rsync` project files to the droplet (respects `.gitignore`, excludes `.env`)
+7. Push `.env`
+8. `docker compose up -d --build --force-recreate`
+
+If any step fails, the deploy aborts — nothing reaches the droplet.
+
+To skip E2E tests (e.g. docs-only changes):
+
+```bash
+make sync LOCAL_FILES=1 SKIP_E2E=1
+```
 
 If you forked this repo, pull upstream changes first, then deploy:
 

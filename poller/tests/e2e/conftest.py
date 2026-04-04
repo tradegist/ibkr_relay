@@ -4,7 +4,7 @@ import httpx
 import pytest
 from collections.abc import Iterator
 
-BASE_URL = "http://localhost:15001"
+BASE_URL = "http://localhost:15011"
 API_TOKEN = "test-token"
 
 

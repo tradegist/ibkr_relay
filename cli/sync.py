@@ -20,12 +20,8 @@ SERVICE_MAP = {
 }
 
 
-def _sync_local_files(droplet_ip):
-    """Rsync project files to the droplet."""
-    if not shutil.which("rsync"):
-        die("rsync is required for --local-files "
-            "(install via: brew install rsync / apt install rsync)")
-
+def _run_checks(skip_e2e):
+    """Run pre-deploy checks: branch, clean tree, typecheck, tests, E2E."""
     # Must be on main branch
     branch = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -41,6 +37,25 @@ def _sync_local_files(droplet_ip):
     ).stdout.strip()
     if dirty:
         die("Cannot sync: uncommitted changes — commit or stash first")
+
+    print("Running type checks...")
+    subprocess.run(["make", "typecheck"], check=True, cwd=PROJECT_DIR)
+
+    print("Running unit tests...")
+    subprocess.run(["make", "test"], check=True, cwd=PROJECT_DIR)
+
+    if skip_e2e:
+        print("Skipping E2E tests (--skip-e2e)")
+    else:
+        print("Running E2E tests...")
+        subprocess.run(["make", "e2e"], check=True, cwd=PROJECT_DIR)
+
+
+def _sync_local_files(droplet_ip):
+    """Rsync project files to the droplet."""
+    if not shutil.which("rsync"):
+        die("rsync is required for --local-files "
+            "(install via: brew install rsync / apt install rsync)")
 
     print("Syncing files to droplet...")
     cmd = [
@@ -74,6 +89,7 @@ def run(args):
         profiles = "poller2"
 
     if args.local_files:
+        _run_checks(args.skip_e2e)
         _sync_local_files(droplet_ip)
 
     build = "--build " if (args.build or args.local_files) else ""
