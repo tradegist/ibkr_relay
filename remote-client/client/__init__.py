@@ -44,7 +44,7 @@ class IBClient:
                 await self.ib.connectAsync(
                     IB_HOST, IB_PORT, clientId=CLIENT_ID, timeout=20
                 )
-                log.info("Connected — accounts: %s", self.ib.managedAccounts())
+                log.info("Connected — %d account(s)", len(self.ib.managedAccounts()))
                 self._retry_delay = INITIAL_RETRY_DELAY
                 return
             except Exception as exc:

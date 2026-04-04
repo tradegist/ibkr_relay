@@ -2,14 +2,14 @@
 
 import httpx
 import pytest
-from collections.abc import Generator
+from collections.abc import Iterator
 
 BASE_URL = "http://localhost:15001"
 API_TOKEN = "test-token"
 
 
 @pytest.fixture(scope="session")
-def api() -> Generator[httpx.Client]:
+def api() -> Iterator[httpx.Client]:
     """Shared httpx client with auth header, scoped to the entire test session."""
     with httpx.Client(
         base_url=BASE_URL,
@@ -20,7 +20,7 @@ def api() -> Generator[httpx.Client]:
 
 
 @pytest.fixture(scope="session")
-def anon_api() -> Generator[httpx.Client]:
+def anon_api() -> Iterator[httpx.Client]:
     """Httpx client without auth — for testing 401 responses."""
     with httpx.Client(base_url=BASE_URL, timeout=15.0) as client:
         yield client
