@@ -2,6 +2,9 @@
 
 Deploy a fully functional **Interactive Brokers Gateway API** to your own server with a few environment variables and one command.
 
+> [!WARNING]
+> This project is under active development and not yet ready for prime time. You're welcome to use it, but expect frequent breaking changes.
+
 ## Why This Project?
 
 IBKR has a notoriously difficult API. To automate anything — placing orders, getting fill confirmations — you need to run their Java-based Gateway or TWS application. That means either keeping it running on your local machine (impractical for web apps or any always-on service) or setting it up on a remote server (surprisingly painful to get right).
