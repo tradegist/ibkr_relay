@@ -20,6 +20,7 @@
 - **Run `make typecheck` before copying ANY Python file to the droplet.** This is non-negotiable. If mypy fails, do NOT push the code.
 - **Run `make test` before assuming work is done and before copying ANY file to the droplet.** If tests fail, fix them first. Never deploy untested code.
 - **Run `make test` and `make typecheck` after every code change**, even refactors. Do not wait until the end — verify immediately.
+- **Run `make e2e` after adding or modifying any E2E test.** E2E tests require the Docker stack — `make test` (unit tests) does not run them. Never assume an E2E test passes without actually running the stack.
 - When modifying any Python file (`.py`), always run `make test` and `make typecheck` and confirm both pass before deploying.
 - **Every Python file must be covered by `make typecheck`.** When adding a new Python service, package, or standalone script, immediately add it to the mypy invocation in the Makefile. No Python file may exist outside mypy's scope.
 - After modifying any model in `poller/models.py` or `remote-client/models.py`, also run `make types` to regenerate the TypeScript definitions.

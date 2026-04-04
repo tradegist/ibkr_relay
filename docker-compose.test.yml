@@ -32,6 +32,8 @@ services:
       API_TOKEN: test-token
     ports:
       - "15000:5000"
+    volumes:
+      - ./remote-client:/app
     healthcheck:
       test:
         [

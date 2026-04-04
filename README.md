@@ -231,6 +231,7 @@ End-to-end tests run against a local Docker stack with a real IB Gateway connect
 
    ```bash
    make e2e-up       # start ib-gateway + webhook-relay (paper mode)
+   make e2e-run      # run tests (stack must be up)
    make e2e-down     # stop and remove containers
    ```
 
@@ -390,6 +391,7 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make typecheck    Run mypy strict type checking
   make e2e          Run E2E tests against local paper account
   make e2e-up       Start E2E test stack (IB Gateway + webhook-relay)
+  make e2e-run      Run E2E tests (stack must be up)
   make e2e-down     Stop and remove E2E test stack
   make gateway     Start IB Gateway container (then open VNC for 2FA)
   make logs        Stream poller logs (Ctrl+C to stop)
