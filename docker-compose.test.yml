@@ -58,5 +58,3 @@ services:
     profiles: ["disabled"]
   gateway-controller:
     profiles: ["disabled"]
-  poller-2:
-    profiles: ["disabled"]

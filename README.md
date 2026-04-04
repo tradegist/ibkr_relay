@@ -237,6 +237,29 @@ End-to-end tests run against a local Docker stack with a real IB Gateway connect
 
 The test stack exposes the API on `http://localhost:15000` with a hardcoded token (`test-token`). The gateway typically connects within ~20 seconds.
 
+### Local production stack
+
+Run the full production stack on your local machine — no TLS, no Caddy, direct port access:
+
+```bash
+make local-up     # build and start all services
+make local-down   # stop and remove containers
+```
+
+Endpoints after startup:
+
+| Service   | URL                           |
+| --------- | ----------------------------- |
+| REST API  | http://localhost:15000/health |
+| Poller    | http://localhost:15001/health |
+| VNC (2FA) | http://localhost:15002        |
+
+If you change `.env`, refresh the running stack without rebuilding:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+```
+
 ## TypeScript Types
 
 Webhook payload and order placement types are available as a TypeScript package under `types/`:
@@ -393,6 +416,8 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make e2e-up       Start E2E test stack (IB Gateway + webhook-relay)
   make e2e-run      Run E2E tests (stack must be up)
   make e2e-down     Stop and remove E2E test stack
+  make local-up    Start full stack locally (no TLS, direct port access)
+  make local-down  Stop local stack
   make gateway     Start IB Gateway container (then open VNC for 2FA)
   make logs        Stream poller logs (Ctrl+C to stop)
   make stats       Show container resource usage
