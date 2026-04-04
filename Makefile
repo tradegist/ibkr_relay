@@ -50,7 +50,7 @@ types: ## Regenerate TypeScript types from Pydantic models
 	@echo "Generated types/poller/webhook.d.ts + types/http/order.d.ts"
 
 test: ## Run unit tests
-	PYTHONPATH=.:poller $(PYTHON) -m pytest -v
+	PYTHONPATH=.:poller:remote-client $(PYTHON) -m pytest -v
 
 typecheck: ## Run mypy strict type checking
 	MYPYPATH=poller $(PYTHON) -m mypy poller/ cli/test_webhook.py
