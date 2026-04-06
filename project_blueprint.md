@@ -246,8 +246,7 @@ kraken_relay/
 │   │   │   ├── ws_parser.py     # Parse Kraken WS messages into Fill/Trade models
 │   │   │   ├── test_ws_parser.py
 │   │   │   ├── dedup.py         # SQLite dedup (processed_fills table, txid key)
-│   │   │   ├── test_dedup.py
-│   │   │   └── test_webhook.py
+│   │   │   └── test_dedup.py
 │   │   ├── routes/              # HTTP API
 │   │   │   ├── __init__.py      # create_routes()
 │   │   │   ├── middlewares.py   # Auth middleware (Bearer token)
@@ -257,22 +256,22 @@ kraken_relay/
 │   │       ├── test_smoke.py
 │   │       └── .env.test.example
 │   ├── poller/                  # REST API poller service (backup)
-│       ├── Dockerfile
-│       ├── requirements.txt
-│       ├── main.py              # Entrypoint (polling loop + HTTP API)
-│       ├── models_poller.py     # Pydantic models (may share with listener)
-│       ├── poller/              # Core polling logic (package)
-│       │   ├── __init__.py      # poll_once(), SQLite dedup, webhook delivery
-│       │   ├── rest_client.py   # Kraken REST API client (authenticated)
-│       │   ├── test_rest_client.py
-│       │   └── test_poller.py
-│       ├── routes/
-│       │   ├── __init__.py
-│       │   ├── middlewares.py
-│       │   └── run.py           # POST /kraken/poller/run (trigger immediate poll)
-│       └── tests/e2e/
-│           ├── conftest.py
-│           └── test_smoke.py
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt
+│   │   ├── main.py              # Entrypoint (polling loop + HTTP API)
+│   │   ├── models_poller.py     # Pydantic models (may share with listener)
+│   │   ├── poller/              # Core polling logic (package)
+│   │   │   ├── __init__.py      # poll_once(), SQLite dedup
+│   │   │   ├── rest_client.py   # Kraken REST API client (authenticated)
+│   │   │   ├── test_rest_client.py
+│   │   │   └── test_poller.py
+│   │   ├── routes/
+│   │   │   ├── __init__.py
+│   │   │   ├── middlewares.py
+│   │   │   └── run.py           # POST /kraken/poller/run (trigger immediate poll)
+│   │   └── tests/e2e/
+│   │       ├── conftest.py
+│   │       └── test_smoke.py
 │   └── notifier/                # Pluggable notification backends (library, no container)
 │       ├── __init__.py          # Registry, load_notifiers(), validate_notifier_env(), notify()
 │       ├── base.py              # BaseNotifier ABC (name, required_env_vars, send)
@@ -303,17 +302,75 @@ kraken_relay/
     └── cloud-init.sh            # Docker install + creates project directory
 ```
 
+### `.dockerignore` (allowlist pattern)
+
+The `.dockerignore` uses an allowlist: deny everything (`*`), then selectively
+allow source directories. Each service that `COPY`s code must be allowed here.
+
+```
+# Deny everything by default
+*
+
+# Allow service source code
+!services/listener/**
+!services/poller/**
+!services/notifier/**
+
+# Re-exclude test files and caches from allowed dirs
+services/listener/**/test_*.py
+services/listener/**/__pycache__/
+services/poller/**/test_*.py
+services/poller/**/__pycache__/
+services/notifier/**/test_*.py
+services/notifier/**/__pycache__/
+```
+
+When adding a new standalone module under `services/`, you MUST add a
+`!services/<module>/**` entry here — otherwise `COPY` in the Dockerfile will
+fail with a cryptic "not found" error.
+
+### Dockerfiles and cross-service modules
+
+Each service Dockerfile must `COPY` the notifier package since it's a separate
+module, not part of the service's own source:
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+
+COPY services/listener/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY services/listener/listener/ ./listener/
+COPY services/listener/routes/ ./routes/
+COPY services/listener/main.py services/listener/models_listener.py ./
+COPY services/notifier/ ./notifier/
+
+CMD ["python", "main.py"]
+```
+
+Because the notifier is `COPY`'d from outside the service directory, the
+Dockerfile's `context` must be the project root (`.`), not `./services/listener`:
+
+```yaml
+# docker-compose.yml
+kraken-listener:
+  build:
+    context: .
+    dockerfile: services/listener/Dockerfile
+```
+
 ---
 
 ## 5. Architecture — Docker Containers
 
 ### Standalone Mode (3 containers)
 
-| Service           | Role                                                                |
-| ----------------- | ------------------------------------------------------------------- |
-| `kraken-listener` | WebSocket v2 connection, real-time fill detection, webhook delivery |
-| `kraken-poller`   | REST API polling fallback, SQLite dedup, webhook delivery           |
-| `caddy`           | Reverse proxy with automatic HTTPS                                  |
+| Service           | Role                                                                 |
+| ----------------- | -------------------------------------------------------------------- |
+| `kraken-listener` | WebSocket v2 connection, real-time fill detection, notifier delivery |
+| `kraken-poller`   | REST API polling fallback, SQLite dedup, notifier delivery           |
+| `caddy`           | Reverse proxy with automatic HTTPS                                   |
 
 ### Shared Mode (2 containers — no Caddy)
 
@@ -494,6 +551,9 @@ Webhook delivery is handled by the **notifier** package (`services/notifier/`), 
 # ── Deployment mode (REQUIRED) ──────────────────────────────────────
 DEPLOY_MODE=standalone
 
+# DigitalOcean API token (standalone mode only — can be removed after first deploy)
+DO_API_TOKEN=your_digitalocean_api_token
+
 # ── Kraken API ───────────────────────────────────────────────────────
 KRAKEN_API_KEY=your-api-key-here
 KRAKEN_API_SECRET=your-api-secret-here
@@ -512,7 +572,6 @@ POLL_INTERVAL_SECONDS=300
 API_TOKEN=generate-a-random-token-here
 
 # ── Infrastructure (standalone mode) ────────────────────────────────
-DO_API_TOKEN=your-digitalocean-token
 SITE_DOMAIN=trade.example.com
 
 # ── Droplet IP (from Terraform output, or provided by host) ────────
@@ -532,7 +591,9 @@ name: kraken-relay
 
 services:
   kraken-listener:
-    build: ./services/listener
+    build:
+      context: .
+      dockerfile: services/listener/Dockerfile
     restart: always
     environment:
       KRAKEN_API_KEY: ${KRAKEN_API_KEY:?Set KRAKEN_API_KEY in .env}
@@ -549,7 +610,9 @@ services:
       - listener-data:/data
 
   kraken-poller:
-    build: ./services/poller
+    build:
+      context: .
+      dockerfile: services/poller/Dockerfile
     restart: always
     environment:
       KRAKEN_API_KEY: ${KRAKEN_API_KEY:?Set KRAKEN_API_KEY in .env}
@@ -593,6 +656,200 @@ networks:
   default:
     name: relay-net
 ```
+
+---
+
+## 11.1. docker-compose.test.yml (E2E Test Overlay)
+
+`docker-compose.test.yml` is a **Compose override file** applied on top of
+`docker-compose.yml`. It is NOT a standalone file — it only works when composed:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.test.yml -p kraken-relay-test --env-file .env.test ...
+```
+
+The Makefile wraps this as `E2E_COMPOSE`.
+
+### Purpose
+
+Transform the production stack into a local E2E test environment by:
+
+1. **Binding host source code into containers** (volume mounts) — so code changes
+   are picked up on `docker compose restart` without rebuilding images.
+2. **Overriding env vars** with test-safe values (hardcoded tokens, dummy config).
+3. **Exposing ports** on localhost so E2E tests (pytest + httpx) can call the APIs.
+4. **Adding healthchecks** so `make e2e-up` can wait for readiness.
+5. **Disabling production-only services** (Caddy) via `profiles: ["disabled"]`.
+
+### Template
+
+```yaml
+# E2E test overrides — applied on top of docker-compose.yml.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.test.yml ...
+# See Makefile E2E_COMPOSE for the full invocation.
+
+services:
+  kraken-listener:
+    restart: "no"
+    environment:
+      API_TOKEN: test-token
+      KRAKEN_API_KEY: ${KRAKEN_API_KEY}       # from .env.test
+      KRAKEN_API_SECRET: ${KRAKEN_API_SECRET} # from .env.test
+      PYTHONPATH: /opt                        # for notifier at /opt/notifier
+    ports:
+      - "15010:5000"
+    volumes:
+      - ./services/listener:/app              # bind-mount source for hot-reload
+      - ./services/notifier:/opt/notifier     # cross-service module (see below)
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  kraken-poller:
+    restart: "no"
+    environment:
+      API_TOKEN: test-token
+      KRAKEN_API_KEY: ${KRAKEN_API_KEY}
+      KRAKEN_API_SECRET: ${KRAKEN_API_SECRET}
+      POLL_INTERVAL_SECONDS: "99999"          # effectively disable auto-poll
+      PYTHONPATH: /opt
+    ports:
+      - "15011:8000"
+    volumes:
+      - ./services/poller:/app
+      - ./services/notifier:/opt/notifier
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  # Disable production-only services
+  caddy:
+    profiles: ["disabled"]
+```
+
+### Why bind mounts replace COPY'd code
+
+In production, the Dockerfile `COPY`s source code into the image at build time.
+In tests, a bind mount like `./services/listener:/app` **replaces the entire
+`/app` directory** with the host's source folder. This means:
+
+- Code edits are reflected instantly — `make e2e-run` does
+  `docker compose restart` (no rebuild needed).
+- But anything else that was `COPY`'d into `/app` by the Dockerfile is gone —
+  including cross-service modules like `notifier/`.
+
+### Cross-service modules (the PYTHONPATH trick)
+
+The notifier package is `COPY`'d into `/app/notifier/` by the Dockerfile. But
+the bind mount `./services/listener:/app` wipes it. You need a second mount:
+
+**WRONG** — nested mount inside `/app`:
+```yaml
+volumes:
+  - ./services/listener:/app
+  - ./services/notifier:/app/notifier    # BROKEN: nested bind mount
+```
+Docker creates `services/listener/notifier/` on the host to back the nested
+mount point. On `docker compose restart`, this empty host directory shadows the
+real content → `ImportError`.
+
+**CORRECT** — mount outside `/app`, add to `PYTHONPATH`:
+```yaml
+volumes:
+  - ./services/listener:/app
+  - ./services/notifier:/opt/notifier    # separate path, no nesting
+environment:
+  PYTHONPATH: /opt                       # Python finds notifier at /opt/notifier
+```
+
+### Port convention
+
+| Service           | Host port | Container port |
+| ----------------- | --------- | -------------- |
+| `kraken-listener` | 15010     | 5000           |
+| `kraken-poller`   | 15011     | 8000           |
+
+E2E tests connect to `http://localhost:15010` / `http://localhost:15011` with
+`API_TOKEN: test-token`.
+
+### `.env.test` and `.env.test.example`
+
+Credentials for E2E tests live in `.env.test` (gitignored). Provide
+`.env.test.example` as a template:
+
+```bash
+# Kraken API credentials for E2E tests (real account, small balance)
+KRAKEN_API_KEY=your-test-api-key
+KRAKEN_API_SECRET=your-test-api-secret
+```
+
+The Makefile passes `--env-file .env.test` so these override the production
+values from `docker-compose.yml`.
+
+### Restart behavior
+
+`restart: "no"` on all services — test containers should not auto-restart on
+failure. If something crashes, the test should fail, not retry silently.
+
+---
+
+## 11.2. docker-compose.local.yml (Local Dev Override)
+
+`docker-compose.local.yml` is a Compose override for **local development** —
+running the full stack on your machine with ports exposed directly (no Caddy,
+no TLS).
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+```
+
+The Makefile wraps this as `make local-up` / `make local-down`.
+
+### Template
+
+```yaml
+# Local dev overrides — direct port access, no Caddy.
+services:
+  kraken-listener:
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./services/listener:/app
+      - ./services/notifier:/opt/notifier
+    environment:
+      PYTHONPATH: /opt
+
+  kraken-poller:
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./services/poller:/app
+      - ./services/notifier:/opt/notifier
+    environment:
+      PYTHONPATH: /opt
+
+  caddy:
+    profiles: ["disabled"]
+```
+
+### Differences from test overlay
+
+| Aspect          | `docker-compose.local.yml`          | `docker-compose.test.yml`                 |
+| --------------- | ----------------------------------- | ----------------------------------------- |
+| Purpose         | Manual dev / debugging              | Automated E2E tests                       |
+| Ports           | Standard (5000, 8000)               | Offset (15010, 15011) to avoid collisions |
+| Env overrides   | Uses `.env` values                  | Hardcoded `test-token`, `--env-file .env.test` |
+| Healthchecks    | None                                | Added (for `make e2e-up` readiness wait)  |
+| `restart`       | Inherits `always` from base         | `"no"` (fail-fast for tests)              |
+| Bind mounts     | Same pattern (source + notifier)    | Same pattern                              |
 
 ---
 
@@ -845,11 +1102,11 @@ every step.
 3. **Dedup** — `listener/dedup.py` (SQLite init, check, mark, prune). Write tests.
 4. **Notifier** — `services/notifier/` (base ABC, webhook backend, registry, loader). Copy from `ibkr_relay` and adapt. Write tests.
 5. **WS Parser** — `listener/ws_parser.py` (parse Kraken WS JSON into Fill models). Write tests with sample messages.
-6. **Listener core** — `listener/__init__.py` (WS connect, subscribe, reconnect loop, integration of parser + dedup + webhook).
+6. **Listener core** — `listener/__init__.py` (WS connect, subscribe, reconnect loop, integration of parser + dedup + notifier).
 7. **HTTP health API** — `routes/health.py`, `routes/middlewares.py`.
 8. **Listener entrypoint** — `main.py` (start WS + HTTP concurrently).
 9. **Dockerfile + docker-compose.yml** — containerize listener.
-10. **Poller** — same sequence (REST client → parser → dedup → webhook → routes → main → Dockerfile).
+10. **Poller** — same sequence (REST client → parser → dedup → notifier → routes → main → Dockerfile).
 11. **CLI** — Copy `cli/core/` from `ibkr_relay` as-is. Write `cli/__init__.py` with Kraken `CoreConfig`. Write `cli/__main__.py` importing `register_parsers()` + `CORE_MODULES`. Add `cli/poll.py` (project-specific).
 12. **Terraform** — `main.tf`, `variables.tf`, `outputs.tf`, `cloud-init.sh`, `env.tftpl`.
 13. **Caddy** — `Caddyfile` (standalone), `kraken.caddy` (shared snippet).
