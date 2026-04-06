@@ -83,6 +83,8 @@ services:
       context: .
       dockerfile: services/poller/Dockerfile
     restart: always
+    deploy:
+      replicas: ${POLLER_REPLICAS:-1}
     environment:
       IBKR_FLEX_TOKEN: ${IBKR_FLEX_TOKEN:?Set IBKR_FLEX_TOKEN in .env}
       IBKR_FLEX_QUERY_ID: ${IBKR_FLEX_QUERY_ID:?Set IBKR_FLEX_QUERY_ID in .env}
@@ -104,6 +106,8 @@ services:
       dockerfile: services/poller/Dockerfile
     restart: always
     profiles: ["poller2"]
+    deploy:
+      replicas: ${POLLER_REPLICAS:-1}
     environment:
       IBKR_FLEX_TOKEN: ${IBKR_FLEX_TOKEN_2:-}
       IBKR_FLEX_QUERY_ID: ${IBKR_FLEX_QUERY_ID_2:-}

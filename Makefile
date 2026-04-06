@@ -7,6 +7,14 @@ E2E_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.test.yml -p
 LOCAL_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.local.yml
 CLI_RELAY_ENV = $(if $(ENV),RELAY_ENV=$(ENV))
 
+# Allow disabling poller: make local-up POLLER=0  or  make sync POLLER=0
+ifdef POLLER
+  ifneq ($(filter $(POLLER),0 1),$(POLLER))
+    $(error POLLER must be 0 or 1 (got: $(POLLER)))
+  endif
+  export POLLER_REPLICAS := $(POLLER)
+endif
+
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
 

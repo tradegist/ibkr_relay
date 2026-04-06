@@ -58,9 +58,10 @@ def _deploy_standalone():
 
     # Start the stack
     profiles = cfg.compose_profiles()
+    compose_env = cfg.compose_env()
     print("Starting services...")
     ssh_cmd(droplet_ip,
-            f"cd {cfg.remote_dir} && COMPOSE_PROFILES='{profiles}' "
+            f"cd {cfg.remote_dir} && {compose_env}COMPOSE_PROFILES='{profiles}' "
             f"docker compose up -d --build")
 
     print()
@@ -162,9 +163,10 @@ def _deploy_shared():
     print("Pushing .env to droplet...")
     scp_file(cfg.project_dir / ".env", f"{cfg.remote_dir}/.env", droplet_ip)
 
+    compose_env = cfg.compose_env()
     print("Starting services (shared mode)...")
     ssh_cmd(droplet_ip,
-            f"cd {cfg.remote_dir} && COMPOSE_PROFILES='{profiles}' "
+            f"cd {cfg.remote_dir} && {compose_env}COMPOSE_PROFILES='{profiles}' "
             f"docker compose -f docker-compose.yml -f docker-compose.shared.yml "
             f"up -d --build --force-recreate")
 

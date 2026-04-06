@@ -44,6 +44,22 @@ def _compose_profiles():
     return ",".join(profiles)
 
 
+def _compose_env():
+    """Compute derived env vars for docker compose commands."""
+    env_vars: dict[str, str] = {}
+    # POLLER_REPLICAS from Makefile (make sync POLLER=0) takes precedence
+    replicas = os.environ.get("POLLER_REPLICAS")
+    if replicas is not None:
+        if replicas not in ("0", "1"):
+            die(f"POLLER_REPLICAS must be 0 or 1 (got: {replicas})")
+        env_vars["POLLER_REPLICAS"] = replicas
+    else:
+        poller_enabled = os.environ.get("POLLER_ENABLED", "true")
+        if poller_enabled.lower() in ("false", "0", "no", ""):
+            env_vars["POLLER_REPLICAS"] = "0"
+    return env_vars
+
+
 def _droplet_size():
     heap = int(env("JAVA_HEAP_SIZE", "768"))
     if heap <= 1024:
@@ -124,6 +140,7 @@ _CONFIG = CoreConfig(
     post_deploy_message="Open the VNC URL and complete 2FA",
     post_resume_message="Open https://{VNC_DOMAIN} to complete 2FA",
     compose_profiles_fn=_compose_profiles,
+    compose_env_fn=_compose_env,
     size_selector_fn=_droplet_size,
     route_prefix="/ibkr",
     pre_sync_hook=_pre_sync_hook,

@@ -342,6 +342,7 @@ All configuration is via environment variables in `.env`:
 | `TARGET_WEBHOOK_URL`    | No       | —                  | Webhook endpoint (empty = log-only dry-run)                          |
 | `WEBHOOK_SECRET`        | No       | —                  | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook) |
 | `NOTIFIERS`             | No       | —                  | Active notification backends (e.g. `webhook`). Empty = dry-run       |
+| `POLLER_ENABLED`        | No       | `true`             | Set to `false` to disable the poller container entirely              |
 | `POLL_INTERVAL_SECONDS` | No       | `600`              | Flex poll interval (seconds)                                         |
 | `TIME_ZONE`             | No       | `America/New_York` | Timezone (tz database format)                                        |
 
@@ -486,6 +487,7 @@ After changing a variable in `.env`, restart only the affected service:
 | `TWS_USERID`, `TWS_PASSWORD`, `TRADING_MODE`, `JAVA_HEAP_SIZE`                                                                        | ib-gateway    | `make sync S=gateway` |
 | `API_TOKEN`                                                                                                                           | remote-client | `make sync S=relay`   |
 | `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, `TARGET_WEBHOOK_URL`, `WEBHOOK_SECRET`, `WEBHOOK_HEADER_NAME/VALUE`, `POLL_INTERVAL_SECONDS` | poller        | `make sync S=poller`  |
+| `POLLER_ENABLED`                                                                                                                      | poller        | `make sync`           |
 | `VNC_DOMAIN`, `SITE_DOMAIN`                                                                                                           | caddy         | `make sync S=caddy`   |
 | Multiple services or unsure                                                                                                           | all           | `make sync`           |
 
@@ -846,6 +848,7 @@ make logs S=ib-gateway
 - [x] TypeScript type definitions (`@tradegist/ibkr-types`, not yet published)
 - [x] E2E test infrastructure (Docker-based, paper account)
 - [x] Real-time listener (opt-in, `LISTENER_ENABLED`)
+- [x] Optional poller disable (`POLLER_ENABLED=false`)
 - [ ] Health monitoring / alerting
 
 ## Flex XML Parsing

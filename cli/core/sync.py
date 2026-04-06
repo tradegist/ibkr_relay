@@ -96,10 +96,12 @@ def run(args):
     print("Pushing .env to droplet...")
     scp_file(cfg.project_dir / ".env", f"{cfg.remote_dir}/.env", droplet_ip)
 
+    compose_env = cfg.compose_env()
+
     if not args.services:
         print(f"{'Rebuilding + restarting' if build else 'Restarting'} all services...")
         ssh_cmd(droplet_ip,
-                f"cd {cfg.remote_dir} && COMPOSE_PROFILES='{profiles}' "
+                f"cd {cfg.remote_dir} && {compose_env}COMPOSE_PROFILES='{profiles}' "
                 f"docker compose {compose_files}up -d {build}--force-recreate")
     else:
         services = []
@@ -113,7 +115,7 @@ def run(args):
         svc_str = " ".join(services)
         print(f"{'Rebuilding + restarting' if build else 'Restarting'}: {svc_str}...")
         ssh_cmd(droplet_ip,
-                f"cd {cfg.remote_dir} && COMPOSE_PROFILES='{profiles}' "
+                f"cd {cfg.remote_dir} && {compose_env}COMPOSE_PROFILES='{profiles}' "
                 f"docker compose {compose_files}up -d {build}--force-recreate {svc_str}")
 
     print("Done.")

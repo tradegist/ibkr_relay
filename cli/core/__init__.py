@@ -51,6 +51,11 @@ class CoreConfig:
     compose_profiles_fn: Callable[[], str] | None = None
     """Optional callback returning COMPOSE_PROFILES value (e.g. 'poller2')."""
 
+    compose_env_fn: Callable[[], dict[str, str]] | None = None
+    """Optional callback returning extra env vars to prepend to docker compose
+    commands (e.g. ``{'POLLER_REPLICAS': '0'}``). Shell env vars override
+    anything in ``.env``, so this is used for derived values."""
+
     size_selector_fn: Callable[[], str] | None = None
     """Optional callback returning droplet size slug for resume.
     If None, defaults to 's-1vcpu-1gb'."""
@@ -70,6 +75,14 @@ class CoreConfig:
     def compose_profiles(self) -> str:
         if self.compose_profiles_fn:
             return self.compose_profiles_fn()
+        return ""
+
+    def compose_env(self) -> str:
+        """Return shell env var assignments to prepend to docker compose commands."""
+        if self.compose_env_fn:
+            env_dict = self.compose_env_fn()
+            if env_dict:
+                return " ".join(f"{k}='{v}'" for k, v in env_dict.items()) + " "
         return ""
 
     def droplet_size(self) -> str:

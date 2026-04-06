@@ -82,6 +82,7 @@
 ## Docker
 
 - **Never use `env_file:` in service definitions.** Always declare each env var explicitly in the `environment:` block with `${VAR}` interpolation. This is critical because `env_file:` is internally a list — override files append rather than replace, causing the production `.env` to leak into test containers. Explicit `environment:` vars with `--env-file` interpolation keeps environments fully isolated and allows clean overrides.
+- **`POLLER_ENABLED=false`** disables the poller container entirely. Implemented via `deploy.replicas: ${POLLER_REPLICAS:-1}` in `docker-compose.yml`. The mapping from `POLLER_ENABLED` to `POLLER_REPLICAS` happens in `cli/__init__.py` (`_compose_env()`) and the Makefile (`POLLER` flag). The derived `POLLER_REPLICAS` is injected as a shell env var in the SSH command (not in `.env`), so it takes precedence over the compose file default.
 - **`.dockerignore` uses an allowlist** (`*` to exclude everything, then `!services/poller/**` to include the whole module). Tests, `__pycache__`, and the Dockerfile itself are re-excluded. This means adding new source files to `services/poller/` requires **no** `.dockerignore` or Dockerfile changes.
 - **When adding a new standalone module** (e.g. `services/notifier/`), you must add a `!services/<module>/**` entry to `.dockerignore` — the allowlist excludes everything by default. Also add exclusions for test files and `__pycache__` under the new module. Without this, `COPY services/<module>/ ./<module>/` in the Dockerfile will fail with a cryptic "not found" error.
 - The poller Dockerfile uses directory COPYs (`COPY services/poller/poller/ ./poller/`, `COPY services/poller/routes/ ./routes/`) so new files are picked up automatically.
@@ -97,7 +98,7 @@ Six Docker containers in a single Compose stack on a DigitalOcean droplet:
 | `novnc`              | Browser VNC proxy for 2FA authentication                                       |
 | `caddy`              | Reverse proxy with automatic HTTPS (Let's Encrypt)                             |
 | `remote-client`     | Python API server — places orders via IB Gateway, optional real-time listener |
-| `poller`             | Polls IBKR Flex for trade confirmations, fires webhooks                        |
+| `poller`             | Polls IBKR Flex for trade confirmations, fires webhooks. Disabled via `POLLER_ENABLED=false` |
 | `gateway-controller` | Lightweight sidecar — starts ib-gateway container via Docker socket            |
 
 All secrets are injected via `.env` → `environment` in `docker-compose.yml`.
