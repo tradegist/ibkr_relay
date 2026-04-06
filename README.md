@@ -107,7 +107,7 @@ Returns `{"connected": true, "tradingMode": "paper"}` when the relay has an acti
 │  ┌────────┴─────────────────────────────────┐                │
 │  │  caddy (reverse proxy + auto HTTPS)      │                │
 │  │  vnc.example.com   → novnc:8080          │                │
-│  │  trade.example.com → webhook-relay:5000  │                │
+│  │  trade.example.com → remote-client:5000  │                │
 │  │  Ports: 80 (HTTP→redirect), 443 (HTTPS)  │                │
 │  └──────────────────────────────────────────┘                │
 │                                                              │
@@ -233,7 +233,7 @@ End-to-end tests run against a local Docker stack with a real IB Gateway connect
    Or manage the stack manually:
 
    ```bash
-   make e2e-up       # start ib-gateway + webhook-relay (paper mode)
+   make e2e-up       # start ib-gateway + remote-client (paper mode)
    make e2e-run      # run tests (stack must be up)
    make e2e-down     # stop and remove containers
    ```
@@ -417,7 +417,7 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make test         Run unit tests (pytest)
   make typecheck    Run mypy strict type checking
   make e2e          Run E2E tests against local paper account
-  make e2e-up       Start E2E test stack (IB Gateway + webhook-relay)
+  make e2e-up       Start E2E test stack (IB Gateway + remote-client)
   make e2e-run      Run E2E tests (stack must be up)
   make e2e-down     Stop and remove E2E test stack
   make local-up    Start full stack locally (no TLS, direct port access)
@@ -468,7 +468,7 @@ make test-webhook S=2                          # send to second webhook
 make test                                      # run unit tests
 make typecheck                                 # strict mypy checking
 make logs                                      # stream poller logs
-make logs S=webhook-relay                      # stream relay logs
+make logs S=remote-client                      # stream relay logs
 make logs S=ib-gateway                         # stream gateway logs
 make gateway                                   # start gateway + complete 2FA in browser
 make pause                           # snapshot + delete droplet
@@ -482,7 +482,7 @@ After changing a variable in `.env`, restart only the affected service:
 | Variable                                                                                                                              | Service       | Command               |
 | ------------------------------------------------------------------------------------------------------------------------------------- | ------------- | --------------------- |
 | `TWS_USERID`, `TWS_PASSWORD`, `TRADING_MODE`, `JAVA_HEAP_SIZE`                                                                        | ib-gateway    | `make sync S=gateway` |
-| `API_TOKEN`                                                                                                                           | webhook-relay | `make sync S=relay`   |
+| `API_TOKEN`                                                                                                                           | remote-client | `make sync S=relay`   |
 | `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, `TARGET_WEBHOOK_URL`, `WEBHOOK_SECRET`, `WEBHOOK_HEADER_NAME/VALUE`, `POLL_INTERVAL_SECONDS` | poller        | `make sync S=poller`  |
 | `VNC_DOMAIN`, `SITE_DOMAIN`                                                                                                           | caddy         | `make sync S=caddy`   |
 | Multiple services or unsure                                                                                                           | all           | `make sync`           |
@@ -549,7 +549,7 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 ├── docker-compose.yml # Container orchestration (6 services)
 ├── docker-compose.shared.yml # Shared-mode overlay (disables Caddy, uses relay-net)
 ├── docker-compose.local.yml # Local dev override (direct port access, no TLS)
-├── docker-compose.test.yml # E2E test stack (ib-gateway + webhook-relay)
+├── docker-compose.test.yml # E2E test stack (ib-gateway + remote-client)
 ├── services/                  # Business-logic services (user-facing features)
 │   ├── remote-client/
 │   │   ├── Dockerfile
@@ -806,7 +806,7 @@ make logs
 Stream remote client logs:
 
 ```bash
-make logs S=webhook-relay
+make logs S=remote-client
 ```
 
 Stream IB Gateway logs:

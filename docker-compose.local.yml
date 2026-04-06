@@ -7,7 +7,7 @@ services:
     ports:
       - "15002:8080"
 
-  webhook-relay:
+  remote-client:
     ports:
       - "15000:5000"
 

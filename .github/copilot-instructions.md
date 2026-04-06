@@ -96,7 +96,7 @@ Six Docker containers in a single Compose stack on a DigitalOcean droplet:
 | `ib-gateway`         | IBKR Gateway (gnzsnz/ib-gateway). Restart policy: `on-failure` (not `always`). |
 | `novnc`              | Browser VNC proxy for 2FA authentication                                       |
 | `caddy`              | Reverse proxy with automatic HTTPS (Let's Encrypt)                             |
-| `webhook-relay`      | Python API server — places orders via IB Gateway                               |
+| `remote-client`     | Python API server — places orders via IB Gateway                               |
 | `poller`             | Polls IBKR Flex for trade confirmations, fires webhooks                        |
 | `gateway-controller` | Lightweight sidecar — starts ib-gateway container via Docker socket            |
 
@@ -169,10 +169,10 @@ The deployment mode is controlled by `DEPLOY_MODE` in `.env` (required, validate
 
 - **E2E tests run against a local Docker stack** with a real IB Gateway connected to a paper trading account. Real orders are placed in paper mode.
 - **Credentials live in `.env.test`** (gitignored). Template: `.env.test.example`.
-- **`docker-compose.test.yml`** at project root defines the test stack (ib-gateway + webhook-relay only, no Caddy/poller/VNC).
+- **`docker-compose.test.yml`** at project root defines the test stack (ib-gateway + remote-client only, no Caddy/poller/VNC).
 - **`make e2e`** starts the stack, waits for connection, runs pytest, then tears down. Always cleans up, even on test failure.
 - **`make e2e-up` / `make e2e-down`** for manual stack management during debugging.
-- **`make e2e-run`** restarts `webhook-relay` and `poller` containers (to pick up code changes from volume mounts), then runs the E2E tests. Safe to call repeatedly during development — no need to rebuild or restart manually.
+- **`make e2e-run`** restarts `remote-client` and `poller` containers (to pick up code changes from volume mounts), then runs the E2E tests. Safe to call repeatedly during development — no need to rebuild or restart manually.
 - **Test API runs on `localhost:15010`** with hardcoded token `test-token`.
 - **No healthcheck on `ib-gateway`** — the `IBClient.connect()` handles retry with exponential backoff, same as production.
 - **Paper accounts require no 2FA**, so the E2E stack is fully automated.
@@ -353,7 +353,7 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
 
 ## Code Style
 
-- Python: `logging` module, f-strings, `aiohttp` for async HTTP in both webhook-relay and poller, `httpx` for sync HTTP client in poller.
+- Python: `logging` module, f-strings, `aiohttp` for async HTTP in both remote-client and poller, `httpx` for sync HTTP client in poller.
 - CLI scripts: Python (`cli/` package), invoked via `python3 -m cli <command>` or `make`. Uses only stdlib (`subprocess`, `urllib.request`, `json`, `os`). No third-party dependencies. Uses lazy dispatch (`importlib.import_module`) — each command only imports its own module.
 - Terraform: all secrets marked `sensitive = true` in `variables.tf`.
 
@@ -416,14 +416,14 @@ cli/                    # Python CLI (operator scripts)
   order.py              # Place orders via HTTPS API
   poll.py               # Trigger immediate Flex poll
 services/               # Business-logic services (user-facing features)
-  remote-client/        # webhook-relay service (see Remote Client Structure above)
+  remote-client/        # remote-client service (see Remote Client Structure above)
   poller/               # Flex poller service (see Poller Structure above)
     models_poller.py    # Pydantic models: Fill, Trade, WebhookPayload, BuySell
   notifier/             # Pluggable notification backends (library, no container)
 infra/                  # Infrastructure backbone (no business logic)
   caddy/Caddyfile       # Reverse proxy config (uses env vars for domains)
   caddy/sites/          # Route snippets imported inside {$SITE_DOMAIN}
-    ibkr.caddy          # /ibkr/* routes (poller, webhook-relay)
+    ibkr.caddy          # /ibkr/* routes (poller, remote-client)
   caddy/domains/        # Full site blocks imported at top level
     ibkr-vnc.caddy      # {$VNC_DOMAIN} block (novnc + gateway-controller)
   gateway-controller/   # CGI sidecar (Alpine, busybox httpd)

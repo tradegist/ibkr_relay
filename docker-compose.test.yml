@@ -6,7 +6,7 @@ services:
   ib-gateway:
     restart: "no"
 
-  webhook-relay:
+  remote-client:
     restart: "no"
     environment:
       API_TOKEN: test-token

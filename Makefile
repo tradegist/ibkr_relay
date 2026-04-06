@@ -74,16 +74,16 @@ local-up: ## Start full stack locally (no TLS, direct port access)
 local-down: ## Stop local stack
 	$(LOCAL_COMPOSE) down
 
-e2e-up: ## Start E2E test stack (IB Gateway + webhook-relay + poller)
+e2e-up: ## Start E2E test stack (IB Gateway + remote-client + poller)
 	@if curl -sf http://localhost:15010/health | grep -q '"connected": true' && \
 	    curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 		echo "Stack already running and connected"; \
 	else \
 		$(E2E_COMPOSE) up -d --build; \
-		echo "Waiting for webhook-relay to connect to IB Gateway..."; \
+		echo "Waiting for remote-client to connect to IB Gateway..."; \
 		for i in $$(seq 1 12); do \
 			if curl -sf http://localhost:15010/health | grep -q '"connected": true'; then \
-				echo "webhook-relay ready"; break; \
+				echo "remote-client ready"; break; \
 			fi; \
 			if $(E2E_COMPOSE) logs ib-gateway 2>&1 | grep -q "Existing session detected"; then \
 				echo ""; \
@@ -116,7 +116,7 @@ e2e-down: ## Stop and remove E2E test stack
 	$(E2E_COMPOSE) down
 
 e2e-run: ## Run E2E tests (stack must be up)
-	@$(E2E_COMPOSE) restart webhook-relay poller > /dev/null 2>&1 && sleep 3
+	@$(E2E_COMPOSE) restart remote-client poller > /dev/null 2>&1 && sleep 3
 	$(PYTHON) -m pytest services/remote-client/tests/e2e/ services/poller/tests/e2e/ -v
 
 e2e: ## Run E2E tests against local paper account (starts/stops stack)

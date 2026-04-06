@@ -56,7 +56,7 @@ services:
       - caddy-data:/data
       - caddy-config:/config
 
-  webhook-relay:
+  remote-client:
     build: ./services/remote-client
     restart: always
     depends_on:

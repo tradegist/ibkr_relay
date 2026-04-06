@@ -11,18 +11,18 @@ API_TOKEN = "test-token"
 
 @pytest.fixture(scope="session", autouse=True)
 def _preflight_check() -> None:
-    """Fail fast if webhook-relay is unreachable or disconnected from IB Gateway."""
+    """Fail fast if remote-client is unreachable or disconnected from IB Gateway."""
     try:
         resp = httpx.get(f"{BASE_URL}/health", timeout=5.0)
     except httpx.HTTPError:
         pytest.exit(
-            "webhook-relay is not reachable at "
+            "remote-client is not reachable at "
             f"{BASE_URL}. Is the E2E stack running? (make e2e-up)",
             returncode=1,
         )
     if resp.status_code != 200 or not resp.json().get("connected"):
         pytest.exit(
-            "webhook-relay is up but NOT connected to IB Gateway. "
+            "remote-client is up but NOT connected to IB Gateway. "
             "This usually means another IBKR session (e.g. local-dev stack) "
             "was running when the test gateway started and IBKR rejected it. "
             "Fix: make e2e-down && make local-down && make e2e-up",

@@ -8,7 +8,7 @@ Detect when the relay system is degraded or down and push a notification so we c
 
 ## 1. Internal Health Endpoint
 
-### 1a. Extend `GET /health` on webhook-relay (port 5000)
+### 1a. Extend `GET /health` on remote-client (port 5000)
 
 Current response: `{"connected": bool}`
 
@@ -62,7 +62,7 @@ Add a `GET /health` handler returning:
 ### 1c. Update Caddyfile routing
 
 Add route so `GET {SITE_DOMAIN}/health/poller` → `poller:8000/health`  
-Keep `GET {SITE_DOMAIN}/health` → `webhook-relay:5000/health` (already works via default route)
+Keep `GET {SITE_DOMAIN}/health` → `remote-client:5000/health` (already works via default route)
 
 **File**: `caddy/Caddyfile`
 
@@ -73,7 +73,7 @@ Keep `GET {SITE_DOMAIN}/health` → `webhook-relay:5000/health` (already works v
 Add `healthcheck` directives to `docker-compose.yml` for the three critical services:
 
 ```yaml
-webhook-relay:
+remote-client:
   healthcheck:
     test:
       [

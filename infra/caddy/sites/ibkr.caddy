@@ -8,5 +8,5 @@ handle /ibkr/poller/* {
 }
 
 handle /ibkr/* {
-    reverse_proxy webhook-relay:5000
+    reverse_proxy remote-client:5000
 }
