@@ -1,11 +1,12 @@
 import time
 from datetime import datetime
 
-from cli import PROJECT_DIR, PROJECT_NAME, die, do_api, env, load_env
+from cli.core import config, die, do_api, env, load_env
 
 
 def run(args):
-    state_file = PROJECT_DIR / ".pause-state"
+    cfg = config()
+    state_file = cfg.project_dir / ".pause-state"
 
     if state_file.exists():
         die(".pause-state already exists — environment is already paused.\n"
@@ -38,7 +39,7 @@ def run(args):
         die("Droplet did not power off in time.")
 
     # 3. Create snapshot
-    snap_name = f"{PROJECT_NAME}-pause-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    snap_name = f"{cfg.project_name}-pause-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     print(f"Creating snapshot: {snap_name}...")
     data = do_api("POST", f"/droplets/{droplet_id}/actions",
                   {"type": "snapshot", "name": snap_name})

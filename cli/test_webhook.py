@@ -5,7 +5,7 @@ import hmac
 import urllib.error
 import urllib.request
 
-from cli import die, env, load_env
+from cli.core import die, env, load_env
 from models_poller import BuySell, Trade, WebhookPayload
 
 SAMPLE_TRADES = [

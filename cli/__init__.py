@@ -1,62 +1,24 @@
+"""IBKR Webhook Relay CLI — project-specific configuration.
+
+Sets up CoreConfig and exposes IBKR-specific helpers used by
+project-specific commands (order, poll, test_webhook).
+"""
+
 import json
 import os
-import subprocess
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
+from cli.core import CoreConfig, die, env, set_config
+
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 PROJECT_NAME = "ibkr-relay"
 REMOTE_DIR = f"/opt/{PROJECT_NAME}"
-_UNSET = object()
 
 
-_VALID_DEPLOY_MODES = ("standalone", "shared")
-
-
-def die(msg):
-    print(f"Error: {msg}", file=sys.stderr)
-    sys.exit(1)
-
-
-def deploy_mode():
-    mode = os.environ.get("DEPLOY_MODE", "").lower()
-    if mode not in _VALID_DEPLOY_MODES:
-        die(f"DEPLOY_MODE must be set to 'standalone' or 'shared' in .env (got: {mode!r})")
-    return mode
-
-
-def is_shared():
-    return deploy_mode() == "shared"
-
-
-def load_env(path=None):
-    path = Path(path) if path else PROJECT_DIR / ".env"
-    if not path.exists():
-        die(".env file not found. Copy .env.example to .env and fill in your values.")
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        key, _, value = line.partition("=")
-        os.environ[key.strip()] = value
-
-
-def env(key, default=_UNSET):
-    val = os.environ.get(key)
-    if val is None:
-        if default is _UNSET:
-            die(f"{key} is not set in .env")
-        return default
-    return val
-
-
-def require_env(*keys):
-    missing = [k for k in keys if not os.environ.get(k)]
-    if missing:
-        die(f"Missing required vars in .env: {', '.join(missing)}")
-
+# ── IBKR-specific helpers ───────────────────────────────────────────
 
 def validate_poller_env(suffix=""):
     required = ["IBKR_FLEX_TOKEN", "IBKR_FLEX_QUERY_ID", "TARGET_WEBHOOK_URL", "WEBHOOK_SECRET"]
@@ -75,51 +37,27 @@ def validate_poller_env(suffix=""):
     return True
 
 
-def compose_profiles():
+def _compose_profiles():
     profiles = []
     if validate_poller_env("_2"):
         profiles.append("poller2")
     return ",".join(profiles)
 
 
-def ssh_key_path():
-    return os.environ.get("SSH_KEY", str(Path.home() / ".ssh" / PROJECT_NAME))
+def _droplet_size():
+    heap = int(env("JAVA_HEAP_SIZE", "768"))
+    if heap <= 1024:
+        return "s-1vcpu-2gb"
+    elif heap <= 3072:
+        return "s-2vcpu-4gb"
+    elif heap <= 6144:
+        return "s-4vcpu-8gb"
+    else:
+        return "s-8vcpu-16gb"
 
 
-def ssh_cmd(ip, command, strict_host_check=True, capture=False):
-    cmd = ["ssh", "-i", ssh_key_path()]
-    if not strict_host_check:
-        cmd += ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5"]
-    cmd += [f"root@{ip}", command]
-    kwargs = {"check": True}
-    if capture:
-        kwargs["capture_output"] = True
-        kwargs["text"] = True
-    return subprocess.run(cmd, **kwargs)
-
-
-def scp_file(local_path, remote_path, ip, strict_host_check=True):
-    cmd = ["scp", "-i", ssh_key_path()]
-    if not strict_host_check:
-        cmd += ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5"]
-    cmd += [str(local_path), f"root@{ip}:{remote_path}"]
-    return subprocess.run(cmd, check=True)
-
-
-def do_api(method, path, data=None):
-    token = env("DO_API_TOKEN")
-    url = f"https://api.digitalocean.com/v2{path}"
-    body = json.dumps(data).encode() if data else None
-    req = urllib.request.Request(url, data=body, method=method)
-    req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req) as resp:
-            content = resp.read()
-            return json.loads(content) if content else None
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode()
-        die(f"DO API error ({e.code} {method} {path}): {err_body}")
+def _pre_sync_hook():
+    validate_poller_env("_2")
 
 
 _RELAY_URLS: dict[str, str] = {
@@ -152,22 +90,54 @@ def relay_api(path, method="POST", data=None):
             die(f"Request failed ({e.code}): {content}")
 
 
-def droplet_size_for_heap(heap_mb):
-    heap = int(heap_mb)
-    if heap <= 1024:
-        return "s-1vcpu-2gb"
-    elif heap <= 3072:
-        return "s-2vcpu-4gb"
-    elif heap <= 6144:
-        return "s-4vcpu-8gb"
-    else:
-        return "s-8vcpu-16gb"
+# ── CoreConfig for IBKR project ────────────────────────────────────
 
+_CONFIG = CoreConfig(
+    project_name=PROJECT_NAME,
+    project_dir=PROJECT_DIR,
+    terraform_vars={
+        "do_token": "DO_API_TOKEN",
+        "tws_userid": "TWS_USERID",
+        "tws_password": "TWS_PASSWORD",
+        "trading_mode": "TRADING_MODE",
+        "vnc_password": "VNC_SERVER_PASSWORD",
+        "webhook_url": "TARGET_WEBHOOK_URL",
+        "webhook_secret": "WEBHOOK_SECRET",
+        "flex_token": "IBKR_FLEX_TOKEN",
+        "flex_query_id": "IBKR_FLEX_QUERY_ID",
+        "poll_interval": "POLL_INTERVAL_SECONDS",
+        "time_zone": "TIME_ZONE",
+        "java_heap_size": "JAVA_HEAP_SIZE",
+        "flex_token_2": "IBKR_FLEX_TOKEN_2",
+        "flex_query_id_2": "IBKR_FLEX_QUERY_ID_2",
+        "webhook_url_2": "TARGET_WEBHOOK_URL_2",
+        "webhook_secret_2": "WEBHOOK_SECRET_2",
+        "poll_interval_2": "POLL_INTERVAL_SECONDS_2",
+    },
+    required_env=[
+        "DO_API_TOKEN", "TWS_USERID", "TWS_PASSWORD",
+        "VNC_SERVER_PASSWORD", "WEBHOOK_SECRET",
+        "IBKR_FLEX_TOKEN", "IBKR_FLEX_QUERY_ID",
+    ],
+    service_map={
+        "gateway": "ib-gateway",
+        "ib-gateway": "ib-gateway",
+        "novnc": "novnc",
+        "vnc": "novnc",
+        "caddy": "caddy",
+        "relay": "webhook-relay",
+        "webhook-relay": "webhook-relay",
+        "poller": "poller",
+        "poller2": "poller-2",
+        "poller-2": "poller-2",
+    },
+    post_deploy_message="Open the VNC URL and complete 2FA",
+    post_resume_message="Open https://{vnc_domain} to complete 2FA".format(
+        vnc_domain=os.environ.get("VNC_DOMAIN", "vnc.example.com"),
+    ),
+    compose_profiles_fn=_compose_profiles,
+    size_selector_fn=_droplet_size,
+    pre_sync_hook=_pre_sync_hook,
+)
 
-def terraform(*args, capture=False):
-    cmd = ["terraform"] + list(args)
-    kwargs = {"cwd": str(PROJECT_DIR / "terraform"), "check": True}
-    if capture:
-        kwargs["capture_output"] = True
-        kwargs["text"] = True
-    return subprocess.run(cmd, **kwargs)
+set_config(_CONFIG)

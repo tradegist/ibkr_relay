@@ -1,6 +1,7 @@
 import json
 
-from cli import REMOTE_DIR, die, env, load_env, relay_api, ssh_cmd, validate_poller_env
+from cli import REMOTE_DIR, relay_api, validate_poller_env
+from cli.core import die, env, load_env, ssh_cmd
 
 
 def run(args):

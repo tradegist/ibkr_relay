@@ -52,6 +52,7 @@ ignore = [
 "services/remote-client/routes/test_*.py" = ["E402"]
 # CLI scripts use conditional imports and have looser style
 "cli/*.py" = ["E402", "F401", "RUF005"]
+"cli/core/*.py" = ["E402", "RUF005"]
 
 [tool.ruff.lint.isort]
 known-first-party = [

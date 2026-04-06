@@ -1,7 +1,8 @@
 import argparse
 import json
 
-from cli import die, load_env, relay_api
+from cli import relay_api
+from cli.core import die, load_env
 
 
 def run(args: argparse.Namespace) -> None:

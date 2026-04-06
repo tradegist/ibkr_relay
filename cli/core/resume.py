@@ -1,24 +1,12 @@
-import os
 import subprocess
 import time
 
-from cli import (
-    PROJECT_DIR,
-    PROJECT_NAME,
-    REMOTE_DIR,
-    die,
-    do_api,
-    droplet_size_for_heap,
-    env,
-    load_env,
-    scp_file,
-    ssh_cmd,
-    validate_poller_env,
-)
+from cli.core import config, die, do_api, env, load_env, scp_file, ssh_cmd
 
 
 def run(args):
-    state_file = PROJECT_DIR / ".pause-state"
+    cfg = config()
+    state_file = cfg.project_dir / ".pause-state"
 
     if not state_file.exists():
         die(".pause-state not found — nothing to resume.\n"
@@ -38,34 +26,30 @@ def run(args):
     reserved_ip = state["RESERVED_IP"]
     region = state["DROPLET_REGION"]
 
-    profiles = ""
-    if validate_poller_env("_2"):
-        profiles = "poller2"
-
-    heap = int(env("JAVA_HEAP_SIZE", "768"))
-    droplet_size = droplet_size_for_heap(heap)
+    profiles = cfg.compose_profiles()
+    droplet_size = cfg.droplet_size()
 
     print(f"Resuming from snapshot: {snapshot_name} ({snapshot_id})")
     print(f"  Region: {region}")
     print(f"  Reserved IP: {reserved_ip}")
-    print(f"  Droplet size: {droplet_size} (heap {heap}MB)")
+    print(f"  Droplet size: {droplet_size}")
 
     # 1. Find SSH key on DigitalOcean
     print("Looking up SSH key...")
     data = do_api("GET", "/account/keys")
-    keys = [k for k in data["ssh_keys"] if PROJECT_NAME in k["name"].lower()]
+    keys = [k for k in data["ssh_keys"] if cfg.project_name in k["name"].lower()]
     ssh_keys_param = []
     if keys:
         ssh_keys_param = [keys[0]["id"]]
         print(f"  SSH key ID: {keys[0]['id']}")
     else:
-        print(f"  Warning: No '{PROJECT_NAME}' SSH key found on DigitalOcean.")
+        print(f"  Warning: No '{cfg.project_name}' SSH key found on DigitalOcean.")
         print("  You may need to add your SSH key manually after creation.")
 
     # 2. Create droplet from snapshot
     print("Creating droplet from snapshot...")
     data = do_api("POST", "/droplets", {
-        "name": PROJECT_NAME,
+        "name": cfg.project_name,
         "region": region,
         "size": droplet_size,
         "image": int(snapshot_id),
@@ -96,10 +80,10 @@ def run(args):
 
     # 4. Sync .env and restart
     print("Syncing .env and restarting containers...")
-    env_file = PROJECT_DIR / ".env"
+    env_file = cfg.project_dir / ".env"
     for _ in range(10):
         try:
-            scp_file(env_file, f"{REMOTE_DIR}/.env", reserved_ip, strict_host_check=False)
+            scp_file(env_file, f"{cfg.remote_dir}/.env", reserved_ip, strict_host_check=False)
             break
         except subprocess.CalledProcessError:
             time.sleep(5)
@@ -107,7 +91,7 @@ def run(args):
         die("Could not push .env to droplet after 10 attempts.")
 
     compose_cmd = (
-        f"cd {REMOTE_DIR} && COMPOSE_PROFILES='{profiles}' "
+        f"cd {cfg.remote_dir} && COMPOSE_PROFILES='{profiles}' "
         "docker compose up -d --force-recreate"
     )
     result = ssh_cmd(reserved_ip, compose_cmd, strict_host_check=False, capture=True)
@@ -121,8 +105,6 @@ def run(args):
     # 6. Clean up
     state_file.unlink()
 
-    vnc_domain = env("VNC_DOMAIN", "vnc.example.com")
-
     print()
     print("=" * 44)
     print("  Resumed successfully!")
@@ -131,9 +113,8 @@ def run(args):
     print(f"  Droplet ID:   {droplet_id}")
     print(f"  Reserved IP:  {reserved_ip}")
     print("  Snapshot deleted (no longer billed)")
-    print()
-    print("  Next steps:")
-    print(f"  1. Open https://{vnc_domain} to complete 2FA")
-    print("  2. The poller will resume automatically")
+    if cfg.post_resume_message:
+        print()
+        print(f"  {cfg.post_resume_message}")
     print()
     print("=" * 44)
