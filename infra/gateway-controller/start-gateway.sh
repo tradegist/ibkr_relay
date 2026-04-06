@@ -8,7 +8,7 @@ if [ "$REQUEST_METHOD" != "POST" ]; then
   exit 0
 fi
 
-result=$(docker start ibkr-relay-ib-gateway-1 2>&1)
+result=$(docker start ${COMPOSE_PROJECT_NAME}-ib-gateway-1 2>&1)
 exit_code=$?
 
 if [ $exit_code -eq 0 ]; then

@@ -1,6 +1,6 @@
 import json
 
-from cli import die, env, load_env, relay_api, ssh_cmd, validate_poller_env
+from cli import REMOTE_DIR, die, env, load_env, relay_api, ssh_cmd, validate_poller_env
 
 
 def run(args):
@@ -30,7 +30,7 @@ def run(args):
 
     if verbose:
         ip = env("DROPLET_IP")
-        cmd = f"cd /opt/ibkr-relay && docker compose exec {service} python poller.py --once"
+        cmd = f"cd {REMOTE_DIR} && docker compose exec {service} python poller.py --once"
         if debug:
             cmd += " --debug"
         if replay is not None:

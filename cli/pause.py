@@ -1,7 +1,7 @@
 import time
 from datetime import datetime
 
-from cli import PROJECT_DIR, die, do_api, env, load_env
+from cli import PROJECT_DIR, PROJECT_NAME, die, do_api, env, load_env
 
 
 def run(args):
@@ -38,7 +38,7 @@ def run(args):
         die("Droplet did not power off in time.")
 
     # 3. Create snapshot
-    snap_name = f"ibkr-relay-pause-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    snap_name = f"{PROJECT_NAME}-pause-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     print(f"Creating snapshot: {snap_name}...")
     data = do_api("POST", f"/droplets/{droplet_id}/actions",
                   {"type": "snapshot", "name": snap_name})

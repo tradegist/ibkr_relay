@@ -87,6 +87,41 @@ Six Docker containers in a single Compose stack on a DigitalOcean droplet:
 All secrets are injected via `.env` → `environment` in `docker-compose.yml`.
 Caddy reads `VNC_DOMAIN` and `TRADE_DOMAIN` from env vars — the Caddyfile uses `{$VNC_DOMAIN}` / `{$TRADE_DOMAIN}` syntax.
 
+### Caddy Snippet Structure
+
+The Caddyfile uses `import` directives to compose routing from snippet files:
+
+```
+infra/caddy/
+  Caddyfile              # Shell: imports from sites/ and domains/
+  sites/
+    ibkr.caddy           # TRADE_DOMAIN route handlers (handle /ibkr/*)
+  domains/
+    ibkr-vnc.caddy       # VNC_DOMAIN site block (full site definition)
+```
+
+- **`sites/*.caddy`** contain `handle` blocks imported inside the `{$TRADE_DOMAIN}` site definition. Each project writes one snippet (e.g. `ibkr.caddy`, `kraken.caddy`). Routes must be prefixed with the project name (`/ibkr/*`, `/kraken/*`) to avoid collisions.
+- **`domains/*.caddy`** contain full site definitions (e.g. `{$VNC_DOMAIN} { ... }`), imported at the top level.
+- This structure allows multiple projects to share a single Caddy instance on the same droplet.
+
+## Deployment Modes
+
+The deployment mode is controlled by `DEPLOY_MODE` in `.env` (required, validated before any deploy or sync).
+
+### Standalone Mode (`DEPLOY_MODE=standalone`)
+
+- Set `DO_API_TOKEN` in `.env`. `make deploy` runs Terraform to create a new droplet, firewall, and reserved IP.
+- After deploy, add `DROPLET_IP` from terraform output to `.env` for `make sync`.
+- `DO_API_TOKEN` can be removed after first deploy for security — the mode is determined by `DEPLOY_MODE`, not by token presence.
+
+### Shared Mode (`DEPLOY_MODE=shared`)
+
+- Set `DROPLET_IP` and `SSH_KEY` in `.env` (no `DO_API_TOKEN` needed).
+- `make deploy` rsyncs files, pushes `.env`, and starts services using `docker-compose.shared.yml` overlay.
+- The shared overlay disables Caddy (the host project runs it) and connects all containers to `relay-net` external Docker network.
+- Caddy snippet files (`infra/caddy/sites/ibkr.caddy`, `infra/caddy/domains/ibkr-vnc.caddy`) must be deployed to the host project's Caddy to enable routing.
+- `make sync` uses the shared compose overlay automatically.
+
 ## Memory & Droplet Sizing
 
 - `JAVA_HEAP_SIZE` in `.env` controls IB Gateway's JVM heap (in MB, default 768, max 10240).
@@ -284,7 +319,7 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
 All commands available via `make` or `python3 -m cli <command>`:
 
 ```bash
-make deploy    # Terraform init + apply (reads .env)
+make deploy    # Standalone: Terraform | Shared: rsync + compose (reads .env)
 make sync      # Push .env to droplet + restart services
 make sync LOCAL_FILES=1  # rsync files + rebuild + restart (full code deploy)
 make destroy   # Terraform destroy
@@ -326,10 +361,11 @@ python3 -m cli poll 2
 ```
 .env.example            # Template — copy to .env and fill in real values
 docker-compose.yml      # All 6 services
+docker-compose.shared.yml # Shared-mode overlay (disables Caddy, uses relay-net)
 cli/                    # Python CLI (operator scripts)
   __init__.py           # Shared helpers (env loading, SSH, DO API, validation)
   __main__.py           # Entry point (lazy dispatch via importlib)
-  deploy.py             # Terraform init + apply
+  deploy.py             # Standalone (Terraform) or shared (rsync + compose)
   destroy.py            # Terraform destroy
   pause.py              # Snapshot + delete droplet
   resume.py             # Restore from snapshot
@@ -342,6 +378,10 @@ services/               # Business-logic services (user-facing features)
     models_poller.py    # Pydantic models: Fill, Trade, WebhookPayload, BuySell
 infra/                  # Infrastructure backbone (no business logic)
   caddy/Caddyfile       # Reverse proxy config (uses env vars for domains)
+  caddy/sites/          # Route snippets imported inside {$TRADE_DOMAIN}
+    ibkr.caddy          # /ibkr/* routes (poller, webhook-relay)
+  caddy/domains/        # Full site blocks imported at top level
+    ibkr-vnc.caddy      # {$VNC_DOMAIN} block (novnc + gateway-controller)
   gateway-controller/   # CGI sidecar (Alpine, busybox httpd)
   novnc/index.html      # Custom VNC UI (Tailwind CSS)
 types/                  # @tradegist/ibkr-types npm package (IbkrPoller + IbkrHttp namespaces)

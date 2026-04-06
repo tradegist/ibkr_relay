@@ -1,23 +1,29 @@
 import os
 import shutil
+import stat
+from pathlib import Path
 
 from cli import (
     PROJECT_DIR,
+    PROJECT_NAME,
+    REMOTE_DIR,
     compose_profiles,
     die,
     env,
     load_env,
     require_env,
+    scp_file,
+    ssh_cmd,
+    ssh_key_path,
     terraform,
 )
 
 
-def run(args):
+def _deploy_standalone():
+    """Deploy via Terraform (own droplet)."""
     for cmd in ["terraform", "curl"]:
         if not shutil.which(cmd):
             die(f"'{cmd}' is required but not installed.")
-
-    load_env()
 
     require_env(
         "DO_API_TOKEN", "TWS_USERID", "TWS_PASSWORD",
@@ -58,6 +64,13 @@ def run(args):
     droplet_ip = terraform("output", "-raw", "droplet_ip", capture=True).stdout.strip()
     vnc_url = terraform("output", "-raw", "vnc_url", capture=True).stdout.strip()
 
+    # Save SSH key for subsequent sync/ssh commands
+    key = terraform("output", "-raw", "ssh_private_key", capture=True).stdout
+    key_path = Path(ssh_key_path())
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    key_path.write_text(key)
+    key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 600
+
     print()
     print("=" * 44)
     print("  Deployment complete!")
@@ -65,9 +78,51 @@ def run(args):
     print()
     print(f"  Droplet IP:  {droplet_ip}")
     print(f"  VNC URL:     {vnc_url}")
+    print(f"  SSH key:     {key_path}")
     print()
     print("  Next steps:")
-    print("  1. Open the VNC URL in your browser")
-    print("  2. Complete the IBKR 2FA handshake")
-    print("  3. The relay will start listening for order fills")
+    print(f"  1. Add DROPLET_IP={droplet_ip} to .env")
+    print("  2. Open the VNC URL and complete 2FA")
     print()
+
+
+def _deploy_shared():
+    """Deploy to an existing shared droplet (no Terraform)."""
+    from cli.sync import _run_checks, _sync_local_files
+
+    droplet_ip = env("DROPLET_IP")
+    profiles = compose_profiles()
+
+    _run_checks(skip_e2e=True)
+    _sync_local_files(droplet_ip)
+
+    print("Pushing .env to droplet...")
+    scp_file(PROJECT_DIR / ".env", f"{REMOTE_DIR}/.env", droplet_ip)
+
+    print("Starting services (shared mode)...")
+    ssh_cmd(droplet_ip,
+            f"cd {REMOTE_DIR} && COMPOSE_PROFILES='{profiles}' "
+            f"docker compose -f docker-compose.yml -f docker-compose.shared.yml "
+            f"up -d --build --force-recreate")
+
+    print()
+    print("=" * 44)
+    print("  Shared deployment complete!")
+    print("=" * 44)
+    print()
+    print("  Deploy Caddy snippets from the host project to enable routing:")
+    print("    infra/caddy/sites/ibkr.caddy   → TRADE_DOMAIN /ibkr/* routes")
+    print("    infra/caddy/domains/ibkr-vnc.caddy → VNC_DOMAIN site block")
+    print()
+
+
+def run(args):
+    load_env()
+
+    from cli import deploy_mode
+    mode = deploy_mode()
+
+    if mode == "standalone":
+        _deploy_standalone()
+    else:
+        _deploy_shared()

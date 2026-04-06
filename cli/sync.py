@@ -3,8 +3,10 @@ import subprocess
 
 from cli import (
     PROJECT_DIR,
+    REMOTE_DIR,
     die,
     env,
+    is_shared,
     load_env,
     scp_file,
     ssh_cmd,
@@ -76,7 +78,7 @@ def _sync_local_files(droplet_ip):
         "--exclude", ".env.test",
         "--exclude", ".deployed-sha",
         f"{PROJECT_DIR}/",
-        f"root@{droplet_ip}:/opt/ibkr-relay/",
+        f"root@{droplet_ip}:{REMOTE_DIR}/",
     ]
     subprocess.run(cmd, check=True)
 
@@ -85,7 +87,7 @@ def _sync_local_files(droplet_ip):
         ["git", "rev-parse", "HEAD"],
         capture_output=True, text=True, check=True, cwd=PROJECT_DIR,
     ).stdout.strip()
-    ssh_cmd(droplet_ip, f"echo '{sha}' > /opt/ibkr-relay/.deployed-sha")
+    ssh_cmd(droplet_ip, f"echo '{sha}' > {REMOTE_DIR}/.deployed-sha")
     print(f"Deployed commit: {sha[:12]}")
 
 
@@ -103,14 +105,19 @@ def run(args):
 
     build = "--build " if (args.build or args.local_files) else ""
 
+    # Shared mode uses the shared compose overlay
+    compose_files = ""
+    if is_shared():
+        compose_files = "-f docker-compose.yml -f docker-compose.shared.yml "
+
     print("Pushing .env to droplet...")
-    scp_file(PROJECT_DIR / ".env", "/opt/ibkr-relay/.env", droplet_ip)
+    scp_file(PROJECT_DIR / ".env", f"{REMOTE_DIR}/.env", droplet_ip)
 
     if not args.services:
         print(f"{'Rebuilding + restarting' if build else 'Restarting'} all services...")
         ssh_cmd(droplet_ip,
-                f"cd /opt/ibkr-relay && COMPOSE_PROFILES='{profiles}' "
-                f"docker compose up -d {build}--force-recreate")
+                f"cd {REMOTE_DIR} && COMPOSE_PROFILES='{profiles}' "
+                f"docker compose {compose_files}up -d {build}--force-recreate")
     else:
         services = []
         for name in args.services:
@@ -123,7 +130,7 @@ def run(args):
         svc_str = " ".join(services)
         print(f"{'Rebuilding + restarting' if build else 'Restarting'}: {svc_str}...")
         ssh_cmd(droplet_ip,
-                f"cd /opt/ibkr-relay && COMPOSE_PROFILES='{profiles}' "
-                f"docker compose up -d {build}--force-recreate {svc_str}")
+                f"cd {REMOTE_DIR} && COMPOSE_PROFILES='{profiles}' "
+                f"docker compose {compose_files}up -d {build}--force-recreate {svc_str}")
 
     print("Done.")

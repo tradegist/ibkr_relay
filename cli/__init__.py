@@ -7,12 +7,28 @@ import urllib.request
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
+PROJECT_NAME = "ibkr-relay"
+REMOTE_DIR = f"/opt/{PROJECT_NAME}"
 _UNSET = object()
+
+
+_VALID_DEPLOY_MODES = ("standalone", "shared")
 
 
 def die(msg):
     print(f"Error: {msg}", file=sys.stderr)
     sys.exit(1)
+
+
+def deploy_mode():
+    mode = os.environ.get("DEPLOY_MODE", "").lower()
+    if mode not in _VALID_DEPLOY_MODES:
+        die(f"DEPLOY_MODE must be set to 'standalone' or 'shared' in .env (got: {mode!r})")
+    return mode
+
+
+def is_shared():
+    return deploy_mode() == "shared"
 
 
 def load_env(path=None):
@@ -67,7 +83,7 @@ def compose_profiles():
 
 
 def ssh_key_path():
-    return os.environ.get("SSH_KEY", str(Path.home() / ".ssh" / "ibkr-relay"))
+    return os.environ.get("SSH_KEY", str(Path.home() / ".ssh" / PROJECT_NAME))
 
 
 def ssh_cmd(ip, command, strict_host_check=True, capture=False):

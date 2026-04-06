@@ -4,6 +4,8 @@ import time
 
 from cli import (
     PROJECT_DIR,
+    PROJECT_NAME,
+    REMOTE_DIR,
     die,
     do_api,
     droplet_size_for_heap,
@@ -51,19 +53,19 @@ def run(args):
     # 1. Find SSH key on DigitalOcean
     print("Looking up SSH key...")
     data = do_api("GET", "/account/keys")
-    keys = [k for k in data["ssh_keys"] if "ibkr-relay" in k["name"].lower()]
+    keys = [k for k in data["ssh_keys"] if PROJECT_NAME in k["name"].lower()]
     ssh_keys_param = []
     if keys:
         ssh_keys_param = [keys[0]["id"]]
         print(f"  SSH key ID: {keys[0]['id']}")
     else:
-        print("  Warning: No 'ibkr-relay' SSH key found on DigitalOcean.")
+        print(f"  Warning: No '{PROJECT_NAME}' SSH key found on DigitalOcean.")
         print("  You may need to add your SSH key manually after creation.")
 
     # 2. Create droplet from snapshot
     print("Creating droplet from snapshot...")
     data = do_api("POST", "/droplets", {
-        "name": "ibkr-relay",
+        "name": PROJECT_NAME,
         "region": region,
         "size": droplet_size,
         "image": int(snapshot_id),
@@ -97,7 +99,7 @@ def run(args):
     env_file = PROJECT_DIR / ".env"
     for _ in range(10):
         try:
-            scp_file(env_file, "/opt/ibkr-relay/.env", reserved_ip, strict_host_check=False)
+            scp_file(env_file, f"{REMOTE_DIR}/.env", reserved_ip, strict_host_check=False)
             break
         except subprocess.CalledProcessError:
             time.sleep(5)
@@ -105,7 +107,7 @@ def run(args):
         die("Could not push .env to droplet after 10 attempts.")
 
     compose_cmd = (
-        f"cd /opt/ibkr-relay && COMPOSE_PROFILES='{profiles}' "
+        f"cd {REMOTE_DIR} && COMPOSE_PROFILES='{profiles}' "
         "docker compose up -d --force-recreate"
     )
     result = ssh_cmd(reserved_ip, compose_cmd, strict_host_check=False, capture=True)

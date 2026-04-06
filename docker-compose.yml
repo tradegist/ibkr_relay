@@ -49,6 +49,8 @@ services:
       TRADE_DOMAIN: ${TRADE_DOMAIN:?Set TRADE_DOMAIN in .env}
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/sites/:/etc/caddy/sites/:ro
+      - ./infra/caddy/domains/:/etc/caddy/domains/:ro
       - caddy-data:/data
       - caddy-config:/config
 
@@ -109,6 +111,8 @@ services:
   gateway-controller:
     build: ./infra/gateway-controller
     restart: always
+    environment:
+      COMPOSE_PROJECT_NAME: ibkr-relay
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     expose:
@@ -119,3 +123,7 @@ volumes:
   poller-2-data:
   caddy-data:
   caddy-config:
+
+networks:
+  default:
+    name: relay-net

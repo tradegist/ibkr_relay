@@ -1,8 +1,9 @@
 .PHONY: setup deploy destroy pause resume sync order poll poll2 test-webhook types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats gateway ssh help
 
+PROJECT = ibkr-relay
 PYTHON ?= .venv/bin/python3
 E2E_ENV = .env.test
-E2E_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.test.yml -p ibkr-relay-test --env-file $(E2E_ENV)
+E2E_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.test.yml -p $(PROJECT)-test --env-file $(E2E_ENV)
 LOCAL_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.local.yml
 CLI_RELAY_ENV = $(if $(ENV),RELAY_ENV=$(ENV))
 
@@ -12,8 +13,8 @@ help: ## Show available commands
 setup: ## Create .venv and install all dependencies
 	@test -d .venv || python3 -m venv .venv
 	.venv/bin/pip install -r requirements-dev.txt -r services/poller/requirements.txt -r services/remote-client/requirements.txt
-	@echo "$(CURDIR)/services/poller" > $$(find .venv/lib -name site-packages -type d)/ibkr-relay.pth
-	@echo "$(CURDIR)/services/remote-client" >> $$(find .venv/lib -name site-packages -type d)/ibkr-relay.pth
+	@echo "$(CURDIR)/services/poller" > $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
+	@echo "$(CURDIR)/services/remote-client" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 
 deploy: ## Deploy infrastructure (Terraform + Docker)
 	$(PYTHON) -m cli deploy
@@ -127,16 +128,16 @@ e2e: ## Run E2E tests against local paper account (starts/stops stack)
 	exit $$ret
 
 logs: ## Stream poller logs (Ctrl+C to stop)
-	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/ibkr-relay} root@$$DROPLET_IP \
-		'cd /opt/ibkr-relay && docker compose logs -f $(or $(S),poller)'
+	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
+		'cd /opt/$(PROJECT) && docker compose logs -f $(or $(S),poller)'
 
 stats: ## Show container resource usage
-	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/ibkr-relay} root@$$DROPLET_IP \
+	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
 		'docker stats --no-stream'
 
 gateway: ## Start IB Gateway container (then open VNC for 2FA)
-	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/ibkr-relay} root@$$DROPLET_IP \
-		'cd /opt/ibkr-relay && docker compose up -d ib-gateway && sleep 2 && docker compose ps ib-gateway'
+	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
+		'cd /opt/$(PROJECT) && docker compose up -d ib-gateway && sleep 2 && docker compose ps ib-gateway'
 
 ssh: ## SSH into the droplet
-	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/ibkr-relay} root@$$DROPLET_IP
+	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP
