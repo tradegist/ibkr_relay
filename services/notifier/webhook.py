@@ -28,11 +28,36 @@ class WebhookNotifier(BaseNotifier):
     def required_env_vars() -> list[str]:
         return ["TARGET_WEBHOOK_URL", "WEBHOOK_SECRET"]
 
+    @staticmethod
+    def _dry_run_summary(payload: BaseModel) -> str:
+        payload_data = payload.model_dump()
+        trades = payload_data.get("trades")
+        if isinstance(trades, list):
+            symbols = sorted(
+                {
+                    trade["symbol"]
+                    for trade in trades
+                    if isinstance(trade, dict) and isinstance(trade.get("symbol"), str)
+                }
+            )
+            return (
+                f"{payload.__class__.__name__}(trade_count={len(trades)}, "
+                f"symbols={symbols})"
+            )
+        return payload.__class__.__name__
+
     def send(self, payload: BaseModel) -> None:
         body = payload.model_dump_json(indent=2)
 
         if not self._url:
-            log.info("Webhook payload (dry-run):\n%s", body)
+            log.info("Webhook dry-run: %s", self._dry_run_summary(payload))
+            log.debug(
+                "Webhook payload (dry-run, redacted):\n%s",
+                payload.model_dump_json(
+                    indent=2,
+                    exclude={"accountId", "acctAlias"},
+                ),
+            )
             return
 
         signature = hmac.new(

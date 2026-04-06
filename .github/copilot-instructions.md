@@ -44,6 +44,18 @@
 - **Use `ConfigDict(extra="forbid")`** on models that define an external contract (e.g. webhook payloads, API responses). This produces `additionalProperties: false` in the JSON Schema, keeping generated TypeScript types strict (no `[k: string]: unknown`).
 - **Docstrings on `parse_fills()` and similar claim "never raises"** — ensure the implementation matches. Wrap any call that can throw (e.g. `ET.fromstring()`) in try/except and return errors in the result tuple.
 
+## Error Handling (MANDATORY)
+
+- **Every error must produce a clear, actionable message.** Whether the consumer is an API caller or a developer reading logs, the error must explain *what* failed and *why*. Never raise or return a generic "something went wrong" — include the relevant context (operation, input identifier, upstream status code, etc.).
+- **API responses must never leak internal details.** Return structured error JSON with an appropriate HTTP status code and a human-readable `error` field. Never expose raw Python tracebacks, file paths, or internal class names to API callers. Log the full exception server-side at `error`/`exception` level for debugging.
+- **Isolate failures — one bad component must not take down the system.** When dispatching to multiple backends, plugins, or external services, wrap each call in `try/except Exception`, log the failure, and continue. A single broken notifier, webhook endpoint, or third-party API must not crash the poll cycle, block other notifiers, or kill the HTTP server.
+- **Never silently swallow errors.** Every `except` block must either log the exception (`log.exception(...)`) or re-raise. A bare `except: pass` is never acceptable — it hides bugs and makes debugging impossible.
+- **Use `log.exception()` for unexpected errors.** It automatically includes the traceback at `ERROR` level. Reserve `log.error()` for known/expected failure conditions where a traceback would be noise.
+- **Distinguish recoverable from fatal errors.** Recoverable errors (network timeout, temporary API failure) should be logged and retried or skipped. Fatal errors (missing required config, corrupted state) should fail fast with `raise SystemExit(1)` or `die()` and a clear message — do not attempt to limp along.
+- **Validate at system boundaries, trust internally.** Validate all external inputs (API payloads, env vars, webhook data, IB Gateway responses) at the point of entry. Once validated, internal code should not re-validate — the type system and Pydantic models carry the guarantees.
+- **HTTP handlers must catch and map exceptions.** Every route handler must have a top-level `try/except` that catches unexpected errors and returns a proper HTTP error response (500 with structured JSON). Unhandled exceptions in aiohttp handlers produce ugly default responses and can leak internals.
+- **Include context in error messages.** Bad: `"Failed to place order"`. Good: `"Failed to place order: TSLA BUY 2 LMT @ 150.0 — IB Gateway returned error code 201: 'Order rejected'"`. The message should contain enough detail to diagnose without consulting logs.
+
 ## Concurrency Safety (MANDATORY)
 
 - **Assume concurrency by default.** Both services are async (aiohttp). Any handler can be interrupted at an `await`. When writing new code, always consider what happens if two requests arrive at the same time.

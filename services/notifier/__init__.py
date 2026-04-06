@@ -31,6 +31,7 @@ def load_notifiers(suffix: str = "") -> list[BaseNotifier]:
     raw = os.environ.get(f"NOTIFIERS{suffix}", "").strip()
     if not raw:
         log.info("No notifiers configured (NOTIFIERS%s is empty) — dry-run mode", suffix)
+        _warn_orphaned_notifier_vars(suffix)
         return []
 
     names = [n.strip() for n in raw.split(",") if n.strip()]
@@ -64,6 +65,23 @@ def load_notifiers(suffix: str = "") -> list[BaseNotifier]:
     return notifiers
 
 
+def _warn_orphaned_notifier_vars(suffix: str = "") -> None:
+    """Warn if any registered notifier's env vars are set but NOTIFIERS is empty."""
+    for name, cls in REGISTRY.items():
+        orphaned = [
+            f"{var}{suffix}"
+            for var in cls.required_env_vars()
+            if os.environ.get(f"{var}{suffix}")
+        ]
+        if orphaned:
+            log.warning(
+                "NOTIFIERS%s is empty but %s env vars are set: %s. "
+                "Add NOTIFIERS%s=%s to enable delivery, "
+                "or remove them to silence this warning.",
+                suffix, name, ", ".join(orphaned), suffix, name,
+            )
+
+
 def validate_notifier_env(suffix: str = "") -> bool:
     """Check whether NOTIFIERS env vars are valid without instantiating.
 
@@ -75,6 +93,9 @@ def validate_notifier_env(suffix: str = "") -> bool:
     """
     raw = os.environ.get(f"NOTIFIERS{suffix}", "").strip()
     if not raw:
+        # Warn if notifier env vars are set but NOTIFIERS is empty —
+        # likely a misconfiguration after the notifier migration.
+        _warn_orphaned_notifier_vars(suffix)
         return False
 
     names = [n.strip() for n in raw.split(",") if n.strip()]
@@ -103,4 +124,10 @@ def notify(notifiers: list[BaseNotifier], payload: BaseModel) -> None:
         return
 
     for notifier in notifiers:
-        notifier.send(payload)
+        try:
+            notifier.send(payload)
+        except Exception:
+            log.exception(
+                "Notifier %s failed while dispatching payload",
+                type(notifier).__name__,
+            )
