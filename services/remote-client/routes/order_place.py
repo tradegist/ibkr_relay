@@ -12,7 +12,9 @@ log = logging.getLogger("routes")
 
 
 async def handle_order(request: web.Request) -> web.Response:
-    client: IBClient = request.app["client"]
+    from routes import client_key
+
+    client: IBClient = request.app[client_key]
 
     if not client.is_connected:
         return web.json_response(

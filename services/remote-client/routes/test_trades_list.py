@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 from aiohttp import web
-from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
+from aiohttp.test_utils import AioHTTPTestCase
 
 from routes import create_routes
 
@@ -35,7 +35,6 @@ class TestTradesNotConnected(AioHTTPTestCase):
     async def get_application(self) -> web.Application:
         return create_routes(_make_client(connected=False))
 
-    @unittest_run_loop
     async def test_not_connected_returns_503(self) -> None:
         resp = await self.client.get(
             "/ibkr/trades",
@@ -50,7 +49,6 @@ class TestTradesConnected(AioHTTPTestCase):
     async def get_application(self) -> web.Application:
         return create_routes(_make_client(connected=True))
 
-    @unittest_run_loop
     async def test_returns_empty_trades(self) -> None:
         resp = await self.client.get(
             "/ibkr/trades",
@@ -60,7 +58,6 @@ class TestTradesConnected(AioHTTPTestCase):
         body = await resp.json()
         assert body == {"trades": []}
 
-    @unittest_run_loop
     async def test_requires_auth(self) -> None:
         resp = await self.client.get("/ibkr/trades")
         assert resp.status == 401

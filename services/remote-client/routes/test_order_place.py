@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 from aiohttp import web
-from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
+from aiohttp.test_utils import AioHTTPTestCase
 
 from routes import create_routes
 
@@ -43,7 +43,6 @@ class TestOrderValidation(AioHTTPTestCase):
         self.mock_client = mock_client
         return create_routes(mock_client)
 
-    @unittest_run_loop
     async def test_missing_symbol_returns_400(self) -> None:
         resp = await self.client.post(
             "/ibkr/order",
@@ -52,7 +51,6 @@ class TestOrderValidation(AioHTTPTestCase):
         )
         assert resp.status == 400
 
-    @unittest_run_loop
     async def test_zero_quantity_returns_400(self) -> None:
         resp = await self.client.post(
             "/ibkr/order",
@@ -64,7 +62,6 @@ class TestOrderValidation(AioHTTPTestCase):
         )
         assert resp.status == 400
 
-    @unittest_run_loop
     async def test_negative_quantity_returns_400(self) -> None:
         resp = await self.client.post(
             "/ibkr/order",
@@ -76,7 +73,6 @@ class TestOrderValidation(AioHTTPTestCase):
         )
         assert resp.status == 400
 
-    @unittest_run_loop
     async def test_invalid_order_type_returns_400(self) -> None:
         resp = await self.client.post(
             "/ibkr/order",
@@ -88,7 +84,6 @@ class TestOrderValidation(AioHTTPTestCase):
         )
         assert resp.status == 400
 
-    @unittest_run_loop
     async def test_invalid_action_returns_400(self) -> None:
         resp = await self.client.post(
             "/ibkr/order",
@@ -100,7 +95,6 @@ class TestOrderValidation(AioHTTPTestCase):
         )
         assert resp.status == 400
 
-    @unittest_run_loop
     async def test_extra_field_returns_400(self) -> None:
         resp = await self.client.post(
             "/ibkr/order",
@@ -112,7 +106,6 @@ class TestOrderValidation(AioHTTPTestCase):
         )
         assert resp.status == 400
 
-    @unittest_run_loop
     async def test_invalid_json_returns_400(self) -> None:
         resp = await self.client.post(
             "/ibkr/order",
@@ -126,7 +119,6 @@ class TestOrderValidation(AioHTTPTestCase):
         body = await resp.json()
         assert body["error"] == "Invalid JSON"
 
-    @unittest_run_loop
     async def test_valid_request_returns_200(self) -> None:
         resp = await self.client.post(
             "/ibkr/order",
@@ -143,7 +135,6 @@ class TestOrderNotConnected(AioHTTPTestCase):
     async def get_application(self) -> web.Application:
         return create_routes(_make_client(connected=False))
 
-    @unittest_run_loop
     async def test_not_connected_returns_503(self) -> None:
         resp = await self.client.post(
             "/ibkr/order",
@@ -162,7 +153,6 @@ class TestOrderBusinessErrors(AioHTTPTestCase):
         self.mock_client = mock_client
         return create_routes(mock_client)
 
-    @unittest_run_loop
     async def test_value_error_returns_400(self) -> None:
         self.mock_client.orders.place = AsyncMock(
             side_effect=ValueError("lmtPrice required")
@@ -177,7 +167,6 @@ class TestOrderBusinessErrors(AioHTTPTestCase):
         )
         assert resp.status == 400
 
-    @unittest_run_loop
     async def test_runtime_error_returns_500(self) -> None:
         self.mock_client.orders.place = AsyncMock(
             side_effect=RuntimeError("IB internal error")

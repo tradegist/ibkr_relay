@@ -7,7 +7,9 @@ from models_remote_client import HealthResponse
 
 
 async def handle_health(request: web.Request) -> web.Response:
-    client: IBClient = request.app["client"]
+    from routes import client_key
+
+    client: IBClient = request.app[client_key]
     resp = HealthResponse(
         connected=client.is_connected,
         tradingMode=TRADING_MODE,
