@@ -73,43 +73,10 @@ resource "digitalocean_droplet" "relay" {
     private_key = tls_private_key.deploy.private_key_openssh
   }
 
-  # Wait for cloud-init to finish (Docker install + repo clone)
+  # Wait for cloud-init to finish (Docker install)
   provisioner "remote-exec" {
     inline = [
       "cloud-init status --wait",
-    ]
-  }
-
-  # Transfer .env with secrets (NOT in user_data — metadata API readable)
-  provisioner "file" {
-    content = templatefile("${path.module}/env.tftpl", {
-      tws_userid     = var.tws_userid
-      tws_password   = var.tws_password
-      trading_mode   = var.trading_mode
-      vnc_password   = var.vnc_password
-      webhook_url    = var.webhook_url
-      webhook_secret = var.webhook_secret
-      flex_token     = var.flex_token
-      flex_query_id  = var.flex_query_id
-      poll_interval  = var.poll_interval
-      time_zone      = var.time_zone
-      java_heap_size = var.java_heap_size
-      vnc_domain     = var.vnc_domain
-      site_domain    = var.site_domain
-      api_token      = var.api_token
-      flex_token_2   = var.flex_token_2
-      flex_query_id_2 = var.flex_query_id_2
-      webhook_url_2  = var.webhook_url_2
-      webhook_secret_2 = var.webhook_secret_2
-      poll_interval_2 = var.poll_interval_2
-    })
-    destination = "/opt/ibkr-relay/.env"
-  }
-
-  # Start the stack
-  provisioner "remote-exec" {
-    inline = [
-      "cd /opt/ibkr-relay && COMPOSE_PROFILES=$(grep -q '^IBKR_FLEX_TOKEN_2=' .env && echo poller2 || echo '') docker compose up -d",
     ]
   }
 }

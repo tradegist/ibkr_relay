@@ -117,7 +117,8 @@ The deployment mode is controlled by `DEPLOY_MODE` in `.env` (required, validate
 
 ### Standalone Mode (`DEPLOY_MODE=standalone`)
 
-- Set `DO_API_TOKEN` in `.env`. `make deploy` runs Terraform to create a new droplet, firewall, and reserved IP.
+- Set `DO_API_TOKEN` in `.env`. `make deploy` runs Terraform to create a new droplet, firewall, and reserved IP, then the CLI rsyncs project files, pushes `.env`, and runs `docker compose up -d --build`.
+- Terraform only creates infrastructure — cloud-init installs Docker and creates the project directory. The CLI handles all file transfer and service startup.
 - After deploy, add `DROPLET_IP` from terraform output to `.env` for `make sync`.
 - `DO_API_TOKEN` can be removed after first deploy for security — the mode is determined by `DEPLOY_MODE`, not by token presence.
 

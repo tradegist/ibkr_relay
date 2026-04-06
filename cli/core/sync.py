@@ -40,7 +40,7 @@ def _run_checks(skip_e2e):
         subprocess.run(["make", "e2e"], check=True, cwd=cfg.project_dir)
 
 
-def _sync_local_files(droplet_ip):
+def _sync_local_files(droplet_ip, *, strict_host_check=True):
     """Rsync project files to the droplet."""
     cfg = config()
 
@@ -48,10 +48,11 @@ def _sync_local_files(droplet_ip):
         die("rsync is required for --local-files "
             "(install via: brew install rsync / apt install rsync)")
 
+    host_check = "yes" if strict_host_check else "no"
     print("Syncing files to droplet...")
     cmd = [
         "rsync", "-az", "--delete",
-        "-e", f"ssh -i {ssh_key_path()}",
+        "-e", f"ssh -i {ssh_key_path()} -o StrictHostKeyChecking={host_check}",
         "--filter", ":- .gitignore",
         "--exclude", ".git/",
         "--exclude", ".env",

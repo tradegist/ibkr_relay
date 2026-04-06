@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# Cloud-init script: Install Docker and clone the project repo.
+# Cloud-init script: Install Docker and prepare the project directory.
 # This runs as root on first boot. NO SECRETS here — they are transferred
-# separately via Terraform file provisioner over SSH.
+# separately by the CLI deploy command over SSH.
 # ---------------------------------------------------------------------------
 
 # Install Docker via official convenience script
@@ -12,12 +12,10 @@ curl -fsSL https://get.docker.com | sh
 systemctl enable docker
 systemctl start docker
 
-# Clone the project repo
-git clone https://github.com/OWNER/ibkr_relay.git /opt/ibkr-relay
+# Create project directory — files arrive via rsync from the CLI
+mkdir -p /opt/ibkr-relay
 
-# Create shared Caddy snippet directories (for shared-mode projects)
-mkdir -p /opt/caddy-shared/sites /opt/caddy-shared/domains
-
-# Directory is ready — Terraform provisioners will:
-# 1. Transfer .env with secrets
-# 2. Run docker compose up -d
+# Directory is ready — the CLI deploy command will:
+# 1. Rsync project files
+# 2. Transfer .env with secrets
+# 3. Run docker compose up -d

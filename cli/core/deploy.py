@@ -20,14 +20,18 @@ from cli.core import (
 
 
 def _deploy_standalone():
-    """Deploy via Terraform (own droplet)."""
+    """Deploy via Terraform (own droplet), then rsync files and start services."""
+    from cli.core.sync import _run_checks, _sync_local_files
+
     cfg = config()
 
-    for cmd in ["terraform", "curl"]:
+    for cmd in ["terraform", "curl", "rsync"]:
         if not shutil.which(cmd):
             die(f"'{cmd}' is required but not installed.")
 
     require_env(*cfg.required_env)
+
+    _run_checks(skip_e2e=True)
 
     # Export TF_VAR_* for Terraform
     for tf_name, env_key in cfg.terraform_vars.items():
@@ -44,6 +48,20 @@ def _deploy_standalone():
     key_path.parent.mkdir(parents=True, exist_ok=True)
     key_path.write_text(key)
     key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 600
+
+    # Rsync project files to the droplet (skip host key check — new droplet)
+    _sync_local_files(droplet_ip, strict_host_check=False)
+
+    # Push .env with secrets
+    print("Pushing .env to droplet...")
+    scp_file(cfg.project_dir / ".env", f"{cfg.remote_dir}/.env", droplet_ip)
+
+    # Start the stack
+    profiles = cfg.compose_profiles()
+    print("Starting services...")
+    ssh_cmd(droplet_ip,
+            f"cd {cfg.remote_dir} && COMPOSE_PROFILES='{profiles}' "
+            f"docker compose up -d --build")
 
     print()
     print("=" * 44)
