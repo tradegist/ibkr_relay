@@ -192,7 +192,11 @@ These are non-negotiable. Every rule below applies from the first commit.
 - **Never use TOCTOU patterns with locks.** Lock acquisition must BE the check.
 - **Financial operations require extra scrutiny** for race conditions, double-execution, partial failure, and idempotency.
 
-### 3.6 Reliability
+### 3.6 Error Handling
+
+- **Never assume a default for financial enum fields.** When mapping external data to a constrained set (e.g. buy/sell side, order type), validate that the value is an exact match. Never use an `else` branch that silently assigns a default — e.g. `BuySell.BUY if x == "buy" else BuySell.SELL` treats *any* non-buy value (including typos, nulls, and garbage) as SELL. Always check every valid value explicitly and raise/error on unknown input.
+
+### 3.7 Reliability
 
 - **Mark-after-notify, never before.** `mark_processed_batch()` must only run AFTER `notify()` completes successfully. A crash between mark and notify silently drops fills — the fill is recorded as processed but the webhook was never sent. Neither the listener (dedup skips it) nor the poller (dedup skips it) will ever retry it. This is unrecoverable data loss.
 - **The correct pattern:** run `notify()` and `mark_processed_batch()` sequentially in the same execution context (same thread or `asyncio.to_thread` call). If `notify()` raises, the fill remains unprocessed and will be retried on the next cycle.
@@ -200,7 +204,7 @@ These are non-negotiable. Every rule below applies from the first commit.
 - **Replay mode is the exception.** Replay intentionally skips dedup for debugging/recovery.
 - **SQLite commits must be explicit.** After any `INSERT`/`UPDATE`, call `conn.commit()` immediately.
 
-### 3.7 Testing
+### 3.8 Testing
 
 - **Unit tests are colocated** next to the source file: `ws_parser.py` → `test_ws_parser.py`.
 - **E2E tests live in `tests/e2e/`** within each service.
@@ -210,19 +214,19 @@ These are non-negotiable. Every rule below applies from the first commit.
 - **pytest** with `--import-mode=importlib`.
 - **E2E conftest fixtures must use `yield` with a context manager.** Never `return httpx.Client(...)` — the client leaks sockets. Use `with httpx.Client(...) as client: yield client`. Scope to `session`. Include a `_preflight_check` fixture (`scope="session"`, `autouse=True`) that hits `/health` and calls `pytest.exit()` if the stack is unreachable.
 
-### 3.8 Docker
+### 3.9 Docker
 
 - **Never use `env_file:` in service definitions.** Always declare each env var explicitly in the `environment:` block with `${VAR}` interpolation.
 - **`.dockerignore` uses an allowlist** (`*` to exclude everything, then `!services/listener/**` etc.). When adding a new standalone module (e.g. `services/notifier/`), add a `!services/<module>/**` entry.
 - **Never nest bind mounts in `docker-compose.test.yml`.** If a service mounts `./services/poller:/app` and you also need `services/notifier/`, mount it at a separate path outside `/app` (e.g. `./services/notifier:/opt/notifier`) and add `PYTHONPATH: /opt` to the service's `environment:` block. Mounting inside the first mount causes Docker to auto-create empty directories on the host that shadow real content on restart.
 - Runtime data MUST use Docker named volumes. Never write to the project directory.
 
-### 3.9 Dependencies
+### 3.10 Dependencies
 
 - **Runtime deps** (`requirements.txt` per service): exact pins (`==`).
 - **Dev deps** (`requirements-dev.txt`): major-version constraints (`>=X,<X+1`).
 
-### 3.10 Model Naming Convention
+### 3.11 Model Naming Convention
 
 All public-facing Pydantic models follow `{Action}{Resource}{InterfaceType}`:
 
@@ -368,9 +372,15 @@ services/dedup/**/test_*.py
 services/dedup/**/__pycache__/
 ```
 
-When adding a new standalone module under `services/`, you MUST add a
-`!services/<module>/**` entry here — otherwise `COPY` in the Dockerfile will
-fail with a cryptic "not found" error.
+When adding a new standalone module under `services/`, you MUST:
+
+1. Add a `!services/<module>/**` entry in `.dockerignore` — otherwise `COPY` in the Dockerfile will fail with a cryptic "not found" error.
+2. Register it in **all four places** in `pyproject.toml`:
+   - `tool.pytest.ini_options.testpaths` — so `make test` discovers its tests.
+   - `tool.ruff.src` — so ruff knows it's project source.
+   - `tool.ruff.lint.isort.known-first-party` — so `from <module> import ...` is classified as first-party, not third-party. Without this, ruff's import ordering (I001) will mis-sort imports in any file that touches the new module.
+   - The mypy invocation in the Makefile — so `make typecheck` covers it.
+3. If the module has model shim files (e.g. `models_<service>.py`), add those names to `known-first-party` too.
 
 ### `.gitignore`
 

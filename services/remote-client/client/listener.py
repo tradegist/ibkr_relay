@@ -46,8 +46,7 @@ def _map_to_fill(trade: IBTrade, fill: IBFill, source: Source) -> Fill:
 
     side = _SIDE_MAP.get(ex.side)
     if side is None:
-        log.warning("Unknown execution side %r, defaulting to BUY", ex.side)
-        side = BuySell.BUY
+        raise ValueError(f"Unknown execution side: {ex.side!r}")
 
     commission = 0.0
     commission_currency = ""
@@ -263,20 +262,21 @@ class ListenerNamespace:
     def _dispatch(self, trade: Trade, *, exec_ids: list[str] | None = None) -> None:
         """Fire webhook in a background thread, then mark fills as processed.
 
-        Marking happens *after* notify() completes so a crash between
-        mark and dispatch cannot silently drop fills.
+        notify() runs via ``to_thread`` (blocking HTTP), but
+        ``mark_processed_batch`` runs on the event-loop thread so the
+        shared ``self._db`` connection is never touched from multiple
+        threads concurrently.
         """
         from notifier import notify
 
         payload = WebhookPayload(trades=[trade], errors=[])
-        db = self._db
 
-        def _send_and_mark() -> None:
-            notify(self._notifiers, payload)
+        async def _send_and_mark() -> None:
+            await asyncio.to_thread(notify, self._notifiers, payload)
             if exec_ids:
-                mark_processed_batch(db, exec_ids)
+                mark_processed_batch(self._db, exec_ids)
 
-        task = asyncio.ensure_future(asyncio.to_thread(_send_and_mark))
+        task = asyncio.create_task(_send_and_mark())
         task.add_done_callback(self._on_dispatch_done)
 
     @staticmethod

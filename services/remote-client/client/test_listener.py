@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from client.listener import ListenerNamespace, _fill_to_trade, _map_to_fill
 from models_poller import BuySell, Fill, WebhookPayload
 
@@ -85,10 +87,15 @@ class TestMapToFillExecDetails:
         f = _map_to_fill(_mock_ib_trade(), fill, "execDetailsEvent")
         assert f.side == BuySell.SELL
 
-    def test_unknown_side_defaults_buy(self) -> None:
+    def test_unknown_side_raises(self) -> None:
         fill = _mock_fill(side="UNKNOWN")
-        f = _map_to_fill(_mock_ib_trade(), fill, "execDetailsEvent")
-        assert f.side == BuySell.BUY
+        with pytest.raises(ValueError, match="Unknown execution side"):
+            _map_to_fill(_mock_ib_trade(), fill, "execDetailsEvent")
+
+    def test_empty_side_raises(self) -> None:
+        fill = _mock_fill(side="")
+        with pytest.raises(ValueError, match="Unknown execution side"):
+            _map_to_fill(_mock_ib_trade(), fill, "execDetailsEvent")
 
     def test_datetime_iso_format(self) -> None:
         dt = datetime(2026, 4, 6, 14, 30, 0, tzinfo=UTC)
