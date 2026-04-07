@@ -5,8 +5,8 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from dedup import get_processed_ids, mark_processed_batch
 
+from dedup import get_processed_ids, mark_processed_batch
 from models_poller import BuySell, Fill, Trade, WebhookPayload
 from poller import (
     get_last_poll_ts,

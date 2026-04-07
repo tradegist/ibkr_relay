@@ -8,13 +8,14 @@ webhook after a quiet period of ``debounce_ms`` milliseconds.
 import asyncio
 import logging
 import sqlite3
+from typing import Any
 
-from dedup import get_processed_ids, is_processed, mark_processed_batch, prune
 from ib_async import IB
 from ib_async import Trade as IBTrade
 from ib_async.objects import CommissionReport
 from ib_async.objects import Fill as IBFill
 
+from dedup import get_processed_ids, is_processed, mark_processed_batch, prune
 from models_poller import (
     BuySell,
     Fill,
@@ -56,7 +57,7 @@ def _map_to_fill(trade: IBTrade, fill: IBFill, source: Source) -> Fill:
         commission_currency = cr.currency or ""
         realized_pnl = cr.realizedPNL if cr.realizedPNL != _UNSET else 0.0
 
-    raw: dict[str, object] = {
+    raw: dict[str, Any] = {
         "ibExecId": ex.execId,
         "orderId": str(o.permId),
         "side": ex.side,

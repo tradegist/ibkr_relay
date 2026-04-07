@@ -8,9 +8,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import httpx
+
 from dedup import get_processed_ids, mark_processed_batch, prune
 from dedup import init_db as _init_dedup_db
-
 from models_poller import Trade, WebhookPayload
 from notifier import notify
 from notifier.base import BaseNotifier

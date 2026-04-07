@@ -9,10 +9,10 @@ import os
 from pathlib import Path
 
 from aiohttp import web
-from dedup import init_db
 
 from client import IBClient
 from client.listener import ListenerNamespace
+from dedup import init_db
 from notifier import load_notifiers
 from routes import create_routes
 

@@ -298,10 +298,11 @@ types/
 Usage:
 
 ```typescript
-import { IbkrPoller, IbkrHttp } from "@tradegist/ibkr-relay-types";
+import { Ibkr, IbkrPoller, IbkrHttp } from "@tradegist/ibkr-relay-types";
 
-const payload: IbkrPoller.WebhookPayload = ...;
-const order: IbkrHttp.PlaceOrderPayload = ...;
+const payload: Ibkr.WebhookPayload = ...;   // shared webhook types
+const poll: IbkrPoller.RunPollResponse = ...; // poller-specific types
+const order: IbkrHttp.PlaceOrderPayload = ...; // order API types
 ```
 
 Types are auto-generated from the Pydantic models via `make types`. The `Trade` type follows the CommonFill contract (`orderId`, `symbol`, `side`, `volume`, `price`, `fee`, `cost`, `orderType`, `timestamp`, `source`, `raw`, `fillCount`, `execIds`). The package is not yet published to npm — the API is still evolving.
