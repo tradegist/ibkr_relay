@@ -546,7 +546,11 @@ the watermark table independently.
 All webhook payload models live in `services/shared/__init__.py` — the **single
 source of truth**. Service-specific files (`models_listener.py`,
 `models_poller.py`) are re-export shims so existing imports like
-`from models_listener import Fill` keep working. Shared models must be added to
+`from models_listener import Fill` keep working. **Shims only re-export
+models and types** (Pydantic models, enums, type aliases). Utility functions
+(`aggregate_fills`, `normalize_order_type`, `_dedup_id`) must be imported
+directly from the owning module (`from shared import aggregate_fills`). Never
+re-export functions through model shims. Shared models must be added to
 `shared` and re-exported with `X as X` for mypy strict re-export compatibility.
 Service-specific models (not shared across services) may be defined directly in
 the shim file with their own `SCHEMA_MODELS` for TypeScript generation.
@@ -684,7 +688,8 @@ the README for webhook consumers.
 
 ### Re-export Shims
 
-`models_listener.py` and `models_poller.py` re-export from shared:
+`models_listener.py` and `models_poller.py` re-export **only models and types**
+from shared:
 
 ```python
 # models_listener.py
@@ -699,6 +704,14 @@ from shared import WebhookPayload as WebhookPayload
 The `X as X` pattern is required for mypy strict mode re-exports (the project
 forbids `__all__`). If a service needs its own models (not shared), define them
 directly in the shim file with a local `SCHEMA_MODELS`.
+
+**Utility functions are never re-exported through shims.** Callers import them
+directly from the owning module:
+
+```python
+# In a parser or service module:
+from shared import aggregate_fills, normalize_order_type
+```
 
 ### OrderType Mapping
 

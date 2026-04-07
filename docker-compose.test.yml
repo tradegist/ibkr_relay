@@ -24,6 +24,7 @@ services:
       - ./services/remote-client:/app
       - ./services/notifier:/opt/notifier
       - ./services/dedup:/opt/dedup
+      - ./services/shared:/opt/shared
       - ./services/poller/models_poller.py:/opt/poller-models/models_poller.py:ro
     healthcheck:
       test:
@@ -52,6 +53,7 @@ services:
       - ./services/poller:/app
       - ./services/notifier:/opt/notifier
       - ./services/dedup:/opt/dedup
+      - ./services/shared:/opt/shared
     healthcheck:
       test:
         [

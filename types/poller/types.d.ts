@@ -5,112 +5,31 @@
  * and run json-schema-to-typescript to regenerate this file.
  */
 
-export type TypesSchema = WebhookPayload | RunPollResponse | HealthResponse;
-export type BuySell = "BUY" | "SELL";
+export type TypesSchema = RunPollResponse | HealthResponse;
+export type BuySell = "buy" | "sell";
 
-export interface WebhookPayload {
-  trades: Trade[];
-  errors: string[];
-}
-/**
- * Aggregated trade — one or more fills grouped by orderId.
- *
- * Numeric fields (quantity, price, commission, taxes, …) are aggregated.
- * String fields use the last fill's value.
- * ``price`` is the quantity-weighted average across fills.
- */
-export interface Trade {
-  source: "flex" | "execDetailsEvent" | "commissionReportEvent";
-  accountId?: string;
-  acctAlias?: string;
-  model?: string;
-  currency?: string;
-  fxRateToBase?: number;
-  assetCategory?: string;
-  subCategory?: string;
-  symbol?: string;
-  description?: string;
-  conid?: string;
-  securityID?: string;
-  securityIDType?: string;
-  cusip?: string;
-  isin?: string;
-  figi?: string;
-  listingExchange?: string;
-  multiplier?: string;
-  underlyingConid?: string;
-  underlyingSymbol?: string;
-  underlyingSecurityID?: string;
-  underlyingListingExchange?: string;
-  issuer?: string;
-  issuerCountryCode?: string;
-  strike?: string;
-  expiry?: string;
-  putCall?: string;
-  tradeID?: string;
-  transactionId?: string;
-  ibExecId?: string;
-  brokerageOrderID?: string;
-  exchOrderId?: string;
-  extExecID?: string;
-  orderId?: string;
-  orderTime?: string;
-  orderType?: string;
-  orderReference?: string;
-  transactionType?: string;
-  exchange?: string;
-  buySell: BuySell;
-  quantity?: number;
-  price?: number;
-  taxes?: number;
-  commission?: number;
-  commissionCurrency?: string;
-  cost?: number;
-  fifoPnlRealized?: number;
-  tradeMoney?: number;
-  proceeds?: number;
-  netCash?: number;
-  closePrice?: number;
-  mtmPnl?: number;
-  accruedInt?: number;
-  dateTime?: string;
-  tradeDate?: string;
-  reportDate?: string;
-  settleDateTarget?: string;
-  openCloseIndicator?: string;
-  notes?: string;
-  origTradePrice?: string;
-  origTradeDate?: string;
-  origTradeID?: string;
-  origOrderID?: string;
-  origTransactionID?: string;
-  clearingFirmID?: string;
-  relatedTradeID?: string;
-  relatedTransactionID?: string;
-  rtn?: string;
-  volatilityOrderLink?: string;
-  openDateTime?: string;
-  holdingPeriodDateTime?: string;
-  whenRealized?: string;
-  whenReopened?: string;
-  levelOfDetail?: string;
-  changeInPrice?: string;
-  changeInQuantity?: string;
-  traderID?: string;
-  isAPIOrder?: string;
-  principalAdjustFactor?: string;
-  initialInvestment?: string;
-  positionActionID?: string;
-  serialNumber?: string;
-  deliveryType?: string;
-  commodityType?: string;
-  fineness?: string;
-  weight?: string;
-  execIds: string[];
-  fillCount: number;
-}
 export interface RunPollResponse {
   trades: Trade[];
+}
+/**
+ * Aggregated trade (one or more fills for the same order).
+ */
+export interface Trade {
+  orderId: string;
+  symbol: string;
+  side: BuySell;
+  orderType?: ("market" | "limit" | "stop" | "stop_limit" | "trailing_stop") | null;
+  price: number;
+  volume: number;
+  cost: number;
+  fee: number;
+  fillCount: number;
+  execIds: string[];
+  timestamp: string;
+  source: "flex" | "execDetailsEvent" | "commissionReportEvent";
+  raw: {
+    [k: string]: unknown;
+  };
 }
 export interface HealthResponse {
   status: string;

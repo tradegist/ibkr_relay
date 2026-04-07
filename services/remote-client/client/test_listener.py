@@ -70,47 +70,47 @@ class TestMapToFillExecDetails:
         assert f.source == "execDetailsEvent"
         assert f.symbol == "TSLA"
         assert f.orderId == "42"
-        assert f.quantity == 5.0
+        assert f.volume == 5.0
         assert f.price == 200.0
-        assert f.buySell == BuySell.BUY
+        assert f.side == BuySell.BUY
 
     def test_commission_zero_on_exec_details(self) -> None:
         f = _map_to_fill(_mock_ib_trade(), _mock_fill(), "execDetailsEvent")
-        assert f.commission == 0.0
-        assert f.commissionCurrency == ""
-        assert f.fifoPnlRealized == 0.0
+        assert f.fee == 0.0
+        assert f.raw["commissionCurrency"] == ""
+        assert f.raw["fifoPnlRealized"] == 0.0
 
     def test_sell_side_mapping(self) -> None:
         fill = _mock_fill(side="SLD")
         f = _map_to_fill(_mock_ib_trade(), fill, "execDetailsEvent")
-        assert f.buySell == BuySell.SELL
+        assert f.side == BuySell.SELL
 
     def test_unknown_side_defaults_buy(self) -> None:
         fill = _mock_fill(side="UNKNOWN")
         f = _map_to_fill(_mock_ib_trade(), fill, "execDetailsEvent")
-        assert f.buySell == BuySell.BUY
+        assert f.side == BuySell.BUY
 
     def test_datetime_iso_format(self) -> None:
         dt = datetime(2026, 4, 6, 14, 30, 0, tzinfo=UTC)
         fill = _mock_fill(time=dt)
         f = _map_to_fill(_mock_ib_trade(), fill, "execDetailsEvent")
-        assert f.dateTime == "2026-04-06T14:30:00+00:00"
+        assert f.timestamp == "2026-04-06T14:30:00+00:00"
 
     def test_datetime_none(self) -> None:
         fill = _mock_fill(time=None)
         f = _map_to_fill(_mock_ib_trade(), fill, "execDetailsEvent")
-        assert f.dateTime == ""
+        assert f.timestamp == ""
 
     def test_account_id(self) -> None:
         fill = _mock_fill(acctNumber="DU12345")
         f = _map_to_fill(_mock_ib_trade(), fill, "execDetailsEvent")
-        assert f.accountId == "DU12345"
+        assert f.raw["accountId"] == "DU12345"
 
     def test_contract_fields(self) -> None:
         ib_trade = _mock_ib_trade(secType="OPT", currency="EUR")
         f = _map_to_fill(ib_trade, _mock_fill(), "execDetailsEvent")
-        assert f.assetCategory == "OPT"
-        assert f.currency == "EUR"
+        assert f.raw["assetCategory"] == "OPT"
+        assert f.raw["currency"] == "EUR"
 
 
 class TestMapToFillCommissionReport:
@@ -122,9 +122,9 @@ class TestMapToFillCommissionReport:
         f = _map_to_fill(_mock_ib_trade(), fill, "commissionReportEvent")
 
         assert f.source == "commissionReportEvent"
-        assert f.commission == 2.50
-        assert f.commissionCurrency == "USD"
-        assert f.fifoPnlRealized == 15.0
+        assert f.fee == 2.50
+        assert f.raw["commissionCurrency"] == "USD"
+        assert f.raw["fifoPnlRealized"] == 15.0
 
     def test_unset_sentinel_treated_as_zero(self) -> None:
         """ib_async uses UNSET_DOUBLE (1.7976...e308) for unset values."""
@@ -134,8 +134,8 @@ class TestMapToFillCommissionReport:
         )
         fill = _mock_fill(commissionReport=cr)
         f = _map_to_fill(_mock_ib_trade(), fill, "commissionReportEvent")
-        assert f.commission == 0.0
-        assert f.fifoPnlRealized == 0.0
+        assert f.fee == 0.0
+        assert f.raw["fifoPnlRealized"] == 0.0
 
 
 class TestFillToTrade:
@@ -145,7 +145,6 @@ class TestFillToTrade:
         f = _map_to_fill(_mock_ib_trade(symbol="NVDA"), _mock_fill(execId="E1"), "commissionReportEvent")
         t = _fill_to_trade(f)
         assert t.symbol == "NVDA"
-        assert t.ibExecId == "E1"
         assert t.execIds == ["E1"]
         assert t.fillCount == 1
 
@@ -227,7 +226,7 @@ class TestListenerDispatchImmediate:
         payload = mock_notify.call_args[0][1]
         assert isinstance(payload, WebhookPayload)
         assert payload.trades[0].source == "commissionReportEvent"
-        assert payload.trades[0].commission == 1.5
+        assert payload.trades[0].fee == 1.5
 
     @patch("notifier.notify")
     def test_commission_report_dedup_skips_duplicate(self, mock_notify: MagicMock) -> None:
@@ -311,13 +310,13 @@ class TestDebounceAggregatesRapidFills:
         payload = mock_notify.call_args[0][1]
         trade = payload.trades[0]
         assert trade.symbol == "NVDA"
-        assert trade.quantity == 100.0
+        assert trade.volume == 100.0
         assert trade.fillCount == 2
         assert set(trade.execIds) == {"E1", "E2"}
         # Weighted average: (30*100 + 70*101) / 100 = 100.7
         assert abs(trade.price - 100.7) < 0.01
         # Commission summed
-        assert abs(trade.commission - 1.25) < 0.01
+        assert abs(trade.fee - 1.25) < 0.01
 
 
 class TestDebounceTimerResets:
@@ -413,7 +412,7 @@ class TestDebounceDedup:
         # Only E2 should be in the trade (E1 filtered out)
         assert trade.fillCount == 1
         assert trade.execIds == ["E2"]
-        assert trade.quantity == 20.0
+        assert trade.volume == 20.0
 
     @patch("notifier.notify")
     def test_all_fills_already_seen_no_dispatch(self, mock_notify: MagicMock) -> None:

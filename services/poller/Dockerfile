@@ -10,5 +10,6 @@ COPY services/poller/poller/ ./poller/
 COPY services/poller/routes/ ./routes/
 COPY services/notifier/ ./notifier/
 COPY services/dedup/ ./dedup/
+COPY services/shared/ ./shared/
 
 CMD ["python", "-u", "main.py"]

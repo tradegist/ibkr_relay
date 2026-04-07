@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from dedup import get_processed_ids, mark_processed_batch
 
-from models_poller import Fill, Trade, WebhookPayload
+from models_poller import BuySell, Fill, Trade, WebhookPayload
 from poller import (
     get_last_poll_ts,
     init_dedup_db,
@@ -51,13 +51,15 @@ def _make_fill(**overrides: Any) -> Fill:
     defaults: dict[str, Any] = {
         "source": "flex",
         "symbol": "AAPL",
-        "buySell": "BUY",
-        "quantity": 1.0,
+        "side": BuySell.BUY,
+        "volume": 1.0,
         "price": 100.0,
-        "transactionId": "TX1",
+        "cost": 0.0,
+        "fee": 0.0,
+        "execId": "TX1",
         "orderId": "ORD1",
-        "dateTime": "20250403;100000",
-        "tradeDate": "20250403",
+        "timestamp": "20250403;100000",
+        "raw": {},
     }
     defaults.update(overrides)
     return Fill(**defaults)
@@ -67,15 +69,16 @@ def _make_trade(**overrides: Any) -> Trade:
     defaults: dict[str, Any] = {
         "source": "flex",
         "symbol": "AAPL",
-        "buySell": "BUY",
-        "quantity": 1.0,
+        "side": BuySell.BUY,
+        "volume": 1.0,
         "price": 100.0,
-        "transactionId": "TX1",
+        "cost": 0.0,
+        "fee": 0.0,
         "orderId": "ORD1",
-        "dateTime": "20250403;100000",
-        "tradeDate": "20250403",
+        "timestamp": "20250403;100000",
         "execIds": ["TX1"],
         "fillCount": 1,
+        "raw": {},
     }
     defaults.update(overrides)
     return Trade(**defaults)
@@ -247,8 +250,8 @@ class TestPollOnce:
         dedup_db: sqlite3.Connection,
         meta_db: sqlite3.Connection,
     ) -> None:
-        fill = _make_fill(transactionId="TX99")
-        trade = _make_trade(transactionId="TX99", execIds=["TX99"])
+        fill = _make_fill(execId="TX99")
+        trade = _make_trade(execIds=["TX99"])
         mock_fetch.return_value = "<xml/>"
         mock_parse.return_value = ([fill], [])
         mock_agg.return_value = [trade]
@@ -275,7 +278,7 @@ class TestPollOnce:
         """Fills already in the DB are not re-sent."""
         mark_processed_batch(dedup_db, ["TX1"])
 
-        fill = _make_fill(transactionId="TX1")
+        fill = _make_fill(execId="TX1")
         mock_fetch.return_value = "<xml/>"
         mock_parse.return_value = ([fill], [])
         mock_agg.return_value = []  # all fills filtered → aggregate gets empty
@@ -298,8 +301,8 @@ class TestPollOnce:
         dedup_db: sqlite3.Connection,
         meta_db: sqlite3.Connection,
     ) -> None:
-        fill = _make_fill(dateTime="20250403;150000")
-        trade = _make_trade(dateTime="20250403;150000", execIds=["TX1"])
+        fill = _make_fill(timestamp="20250403;150000")
+        trade = _make_trade(timestamp="20250403;150000", execIds=["TX1"])
         mock_fetch.return_value = "<xml/>"
         mock_parse.return_value = ([fill], [])
         mock_agg.return_value = [trade]
@@ -324,9 +327,9 @@ class TestPollOnce:
         """Fills older than the watermark are filtered by timestamp pre-filter."""
         set_last_poll_ts(meta_db, "20250403;120000")
 
-        old_fill = _make_fill(transactionId="OLD", dateTime="20250403;100000")
-        new_fill = _make_fill(transactionId="NEW", dateTime="20250403;130000")
-        trade = _make_trade(transactionId="NEW", execIds=["NEW"])
+        old_fill = _make_fill(execId="OLD", timestamp="20250403;100000")
+        new_fill = _make_fill(execId="NEW", timestamp="20250403;130000")
+        trade = _make_trade(execIds=["NEW"])
         mock_fetch.return_value = "<xml/>"
         mock_parse.return_value = ([old_fill, new_fill], [])
 
@@ -385,7 +388,7 @@ class TestPollOnce:
         meta_db: sqlite3.Connection,
     ) -> None:
         """replay=N re-sends N fills even if already processed."""
-        fill = _make_fill(transactionId="TX1")
+        fill = _make_fill(execId="TX1")
         trade = _make_trade(execIds=["TX1"])
         mark_processed_batch(dedup_db, ["TX1"])  # already seen
 
@@ -415,10 +418,10 @@ class TestPollOnce:
         meta_db: sqlite3.Connection,
     ) -> None:
         """Multiple new trades are batched into a single webhook call."""
-        f1 = _make_fill(transactionId="TX1", orderId="O1", symbol="AAPL")
-        f2 = _make_fill(transactionId="TX2", orderId="O2", symbol="GOOG")
-        t1 = _make_trade(transactionId="TX1", orderId="O1", symbol="AAPL", execIds=["TX1"])
-        t2 = _make_trade(transactionId="TX2", orderId="O2", symbol="GOOG", execIds=["TX2"])
+        f1 = _make_fill(execId="TX1", orderId="O1", symbol="AAPL")
+        f2 = _make_fill(execId="TX2", orderId="O2", symbol="GOOG")
+        t1 = _make_trade(orderId="O1", symbol="AAPL", execIds=["TX1"])
+        t2 = _make_trade(orderId="O2", symbol="GOOG", execIds=["TX2"])
 
         mock_fetch.return_value = "<xml/>"
         mock_parse.return_value = ([f1, f2], [])
@@ -485,10 +488,10 @@ class TestPollOnceE2E:
         assert t.symbol == "AAPL"
         assert t.orderId == "ORD100"
         assert t.fillCount == 2
-        assert t.quantity == pytest.approx(15.0)
+        assert t.volume == pytest.approx(15.0)
         # Weighted avg price: (10*150.5 + 5*151.0) / 15 = 2260/15
         assert t.price == pytest.approx(2260 / 15, rel=1e-6)
-        assert t.commission == pytest.approx(-1.5)
+        assert t.fee == pytest.approx(-1.5)
         assert t.execIds == ["exec.001", "exec.002"]
 
         # Webhook sent with the aggregated trade

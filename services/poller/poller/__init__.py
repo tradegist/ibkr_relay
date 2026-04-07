@@ -11,9 +11,10 @@ import httpx
 from dedup import get_processed_ids, mark_processed_batch, prune
 from dedup import init_db as _init_dedup_db
 
-from models_poller import Trade, WebhookPayload, _dedup_id, aggregate_fills
+from models_poller import Trade, WebhookPayload
 from notifier import notify
 from notifier.base import BaseNotifier
+from shared import aggregate_fills
 
 from .flex_parser import parse_fills
 
@@ -170,11 +171,11 @@ def poll_once(
             print("--- End Raw Flex XML ---")
 
         if all_fills:
-            fill_times = [f.dateTime for f in all_fills]
+            fill_times = [f.timestamp for f in all_fills]
             log.info("Trade time range: %s to %s", min(fill_times), max(fill_times))
             for f in all_fills:
-                log.info("  Fill: %s %s dedup=%s dateTime=%s",
-                         f.buySell, f.symbol, _dedup_id(f), f.dateTime)
+                log.info("  Fill: %s %s dedup=%s timestamp=%s",
+                         f.side, f.symbol, f.execId, f.timestamp)
 
         # Always show a sample of the first aggregated trade for debugging
         all_trades = aggregate_fills(all_fills)
@@ -184,22 +185,22 @@ def poll_once(
         # Pre-filter by timestamp watermark to reduce dedup work
         last_ts = get_last_poll_ts(meta_conn)
         if last_ts:
-            candidates = [f for f in all_fills if f.dateTime >= last_ts]
+            candidates = [f for f in all_fills if f.timestamp >= last_ts]
             log.info("Timestamp pre-filter: %d -> %d candidate(s) (watermark: %s)",
                      len(all_fills), len(candidates), last_ts)
             if len(candidates) < len(all_fills):
-                filtered = [f for f in all_fills if f.dateTime < last_ts]
+                filtered = [f for f in all_fills if f.timestamp < last_ts]
                 for f in filtered:
-                    log.info("  Filtered out: %s %s dateTime=%s < watermark %s",
-                             f.buySell, f.symbol, f.dateTime, last_ts)
+                    log.info("  Filtered out: %s %s timestamp=%s < watermark %s",
+                             f.side, f.symbol, f.timestamp, last_ts)
         else:
             candidates = all_fills
             log.info("No timestamp watermark — processing all %d fill(s)", len(candidates))
 
         # Dedup remaining candidates against stored exec IDs
-        candidate_ids = {_dedup_id(f) for f in candidates}
+        candidate_ids = {f.execId for f in candidates}
         already_seen = get_processed_ids(dedup_conn, candidate_ids)
-        new_fills = [f for f in candidates if _dedup_id(f) not in already_seen]
+        new_fills = [f for f in candidates if f.execId not in already_seen]
         log.info("%d new fill(s) after dedup", len(new_fills))
 
         if not new_fills:
@@ -218,9 +219,9 @@ def poll_once(
 
         for trade in trades:
             log.info(
-                "New trade: %s %s %s @ price %s (qty %s, %d fill(s))",
-                trade.buySell, trade.symbol, trade.orderId,
-                trade.price, trade.quantity, trade.fillCount,
+                "New trade: %s %s %s @ price %s (vol %s, %d fill(s))",
+                trade.side, trade.symbol, trade.orderId,
+                trade.price, trade.volume, trade.fillCount,
             )
 
         # Send a single webhook with all trades
@@ -231,7 +232,7 @@ def poll_once(
         mark_processed_batch(dedup_conn, all_new_ids)
 
         # Update timestamp watermark to the latest trade time
-        max_ts = max(f.dateTime for f in new_fills)
+        max_ts = max(f.timestamp for f in new_fills)
         set_last_poll_ts(meta_conn, max_ts)
         log.info("Updated timestamp watermark to %s", max_ts)
 

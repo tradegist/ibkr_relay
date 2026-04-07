@@ -21,9 +21,9 @@ from models_poller import (
     Source,
     Trade,
     WebhookPayload,
-    aggregate_fills,
 )
 from notifier.base import BaseNotifier
+from shared import aggregate_fills
 
 log = logging.getLogger("ib-listener")
 
@@ -33,8 +33,11 @@ _SIDE_MAP: dict[str, BuySell] = {
 }
 
 
+_UNSET = 1.7976931348623157e308  # ib_async sentinel for unset floats
+
+
 def _map_to_fill(trade: IBTrade, fill: IBFill, source: Source) -> Fill:
-    """Convert an ib_async Trade + single Fill into a poller Fill."""
+    """Convert an ib_async Trade + single Fill into a CommonFill."""
     ex = fill.execution
     cr = fill.commissionReport
     o = trade.order
@@ -49,35 +52,59 @@ def _map_to_fill(trade: IBTrade, fill: IBFill, source: Source) -> Fill:
     commission_currency = ""
     realized_pnl = 0.0
     if cr and source == "commissionReportEvent":
-        commission = cr.commission if cr.commission != 1.7976931348623157e308 else 0.0
+        commission = cr.commission if cr.commission != _UNSET else 0.0
         commission_currency = cr.currency or ""
-        realized_pnl = cr.realizedPNL if cr.realizedPNL != 1.7976931348623157e308 else 0.0
+        realized_pnl = cr.realizedPNL if cr.realizedPNL != _UNSET else 0.0
+
+    raw: dict[str, object] = {
+        "ibExecId": ex.execId,
+        "orderId": str(o.permId),
+        "side": ex.side,
+        "quantity": ex.shares,
+        "price": ex.price,
+        "symbol": c.symbol,
+        "assetCategory": c.secType,
+        "exchange": ex.exchange,
+        "currency": c.currency,
+        "commission": commission,
+        "commissionCurrency": commission_currency,
+        "fifoPnlRealized": realized_pnl,
+        "dateTime": ex.time.isoformat() if ex.time else "",
+        "accountId": ex.acctNumber if hasattr(ex, "acctNumber") else "",
+    }
 
     return Fill(
-        source=source,
-        ibExecId=ex.execId,
+        execId=ex.execId,
         orderId=str(o.permId),
-        buySell=side,
-        quantity=ex.shares,
-        price=ex.price,
         symbol=c.symbol,
-        assetCategory=c.secType,
-        exchange=ex.exchange,
-        currency=c.currency,
-        commission=commission,
-        commissionCurrency=commission_currency,
-        fifoPnlRealized=realized_pnl,
-        dateTime=ex.time.isoformat() if ex.time else "",
-        accountId=ex.acctNumber if hasattr(ex, "acctNumber") else "",
+        side=side,
+        orderType=None,
+        price=ex.price,
+        volume=ex.shares,
+        cost=0.0,
+        fee=commission,
+        timestamp=ex.time.isoformat() if ex.time else "",
+        source=source,
+        raw=raw,
     )
 
 
 def _fill_to_trade(fill: Fill) -> Trade:
     """Wrap a single Fill in a 1-fill Trade for immediate dispatch."""
     return Trade(
-        **{f: getattr(fill, f) for f in Fill.model_fields},
-        execIds=[fill.ibExecId],
+        orderId=fill.orderId,
+        symbol=fill.symbol,
+        side=fill.side,
+        orderType=fill.orderType,
+        price=fill.price,
+        volume=fill.volume,
+        cost=fill.cost,
+        fee=fill.fee,
         fillCount=1,
+        execIds=[fill.execId],
+        timestamp=fill.timestamp,
+        source=fill.source,
+        raw=fill.raw,
     )
 
 
@@ -142,8 +169,8 @@ class ListenerNamespace:
         mapped = _map_to_fill(trade, fill, "execDetailsEvent")
         log.info(
             "execDetailsEvent: %s %s %s @ %.4f (execId=%s)",
-            mapped.buySell.value, mapped.quantity, mapped.symbol,
-            mapped.price, mapped.ibExecId,
+            mapped.side.value, mapped.volume, mapped.symbol,
+            mapped.price, mapped.execId,
         )
         self._dispatch(_fill_to_trade(mapped))
 
@@ -161,19 +188,19 @@ class ListenerNamespace:
 
     def _dispatch_immediate(self, mapped: Fill) -> None:
         """Legacy path: dedup + dispatch a single fill immediately."""
-        if is_processed(self._db, mapped.ibExecId):
+        if is_processed(self._db, mapped.execId):
             log.info(
                 "commissionReportEvent skipped (duplicate): %s %s %s (execId=%s)",
-                mapped.buySell.value, mapped.quantity, mapped.symbol, mapped.ibExecId,
+                mapped.side.value, mapped.volume, mapped.symbol, mapped.execId,
             )
             return
 
         log.info(
-            "commissionReportEvent: %s %s %s commission=%.4f (execId=%s)",
-            mapped.buySell.value, mapped.quantity, mapped.symbol,
-            mapped.commission, mapped.ibExecId,
+            "commissionReportEvent: %s %s %s fee=%.4f (execId=%s)",
+            mapped.side.value, mapped.volume, mapped.symbol,
+            mapped.fee, mapped.execId,
         )
-        mark_processed(self._db, mapped.ibExecId)
+        mark_processed(self._db, mapped.execId)
         self._dispatch(_fill_to_trade(mapped))
 
     # ── Debounce logic ───────────────────────────────────────────────────
@@ -183,8 +210,8 @@ class ListenerNamespace:
         order_id = fill.orderId
         log.info(
             "commissionReportEvent buffered: %s %s %s (execId=%s, orderId=%s)",
-            fill.buySell.value, fill.quantity, fill.symbol,
-            fill.ibExecId, order_id,
+            fill.side.value, fill.volume, fill.symbol,
+            fill.execId, order_id,
         )
         self._pending.setdefault(order_id, []).append(fill)
 
@@ -206,9 +233,9 @@ class ListenerNamespace:
             return
 
         # Filter against shared dedup DB
-        all_ids = {f.ibExecId for f in fills}
+        all_ids = {f.execId for f in fills}
         already_seen = get_processed_ids(self._db, all_ids)
-        new_fills = [f for f in fills if f.ibExecId not in already_seen]
+        new_fills = [f for f in fills if f.execId not in already_seen]
 
         if not new_fills:
             log.info(
@@ -224,13 +251,13 @@ class ListenerNamespace:
 
         trade = trades[0]  # All fills share the same orderId → 1 trade
         log.info(
-            "Debounce flush: %s %s orderId=%s — %d new fill(s), qty=%.4f, avgPrice=%.4f",
-            trade.buySell.value, trade.symbol, order_id,
-            trade.fillCount, trade.quantity, trade.price,
+            "Debounce flush: %s %s orderId=%s — %d new fill(s), vol=%.4f, avgPrice=%.4f",
+            trade.side.value, trade.symbol, order_id,
+            trade.fillCount, trade.volume, trade.price,
         )
 
         # Mark as processed, then dispatch
-        mark_processed_batch(self._db, [f.ibExecId for f in new_fills])
+        mark_processed_batch(self._db, [f.execId for f in new_fills])
         self._dispatch(trade)
 
     # ── Dispatch ─────────────────────────────────────────────────────────
