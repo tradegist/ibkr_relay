@@ -114,6 +114,7 @@ local-down: ## Stop local stack
 	$(LOCAL_COMPOSE) down
 
 e2e-up: ## Start E2E test stack (IB Gateway + remote-client + poller)
+	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — copy .env.test.example to .env.test and fill in credentials"; exit 1; }
 	@if curl -sf http://localhost:15010/health | grep -q '"connected": true' && \
 	    curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 		echo "Stack already running and connected"; \
@@ -152,6 +153,7 @@ e2e-up: ## Start E2E test stack (IB Gateway + remote-client + poller)
 	fi
 
 e2e-down: ## Stop and remove E2E test stack
+	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — nothing to tear down"; exit 1; }
 	$(E2E_COMPOSE) down
 
 e2e-run: ## Run E2E tests (stack must be up)
@@ -159,6 +161,7 @@ e2e-run: ## Run E2E tests (stack must be up)
 	$(PYTHON) -m pytest services/remote-client/tests/e2e/ services/poller/tests/e2e/ -v
 
 e2e: ## Run E2E tests against local paper account (starts/stops stack)
+	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — copy .env.test.example to .env.test and fill in credentials"; exit 1; }
 	@was_up=false; \
 	if curl -sf http://localhost:15010/health | grep -q '"connected": true' && \
 	   curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
