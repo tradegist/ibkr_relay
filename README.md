@@ -308,28 +308,28 @@ Types are auto-generated from the Pydantic models via `make types`. The package 
 
 All configuration is via environment variables in `.env`:
 
-| Variable                | Required | Default            | Description                                                                                           |
-| ----------------------- | -------- | ------------------ | ----------------------------------------------------------------------------------------------------- |
-| `DO_API_TOKEN`          | Yes      | —                  | DigitalOcean API token                                                                                |
-| `TWS_USERID`            | Yes      | —                  | IBKR account username                                                                                 |
-| `TWS_PASSWORD`          | Yes      | —                  | IBKR account password                                                                                 |
-| `TRADING_MODE`          | No       | `paper`            | `paper` or `live`                                                                                     |
-| `VNC_SERVER_PASSWORD`   | Yes      | —                  | Password for noVNC browser access                                                                     |
-| `VNC_DOMAIN`            | Yes      | —                  | Domain for VNC access (see [Domains & HTTPS](#domains--https))                                        |
-| `SITE_DOMAIN`           | Yes      | —                  | Domain for trade API (see [Domains & HTTPS](#domains--https))                                         |
-| `API_TOKEN`             | Yes      | —                  | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)                                         |
-| `IBKR_FLEX_TOKEN`       | Yes      | —                  | Flex Web Service token (from Client Portal)                                                           |
-| `IBKR_FLEX_QUERY_ID`    | Yes      | —                  | Flex Query ID (Trade Confirmation or Activity)                                                        |
-| `TARGET_WEBHOOK_URL`    | No       | —                  | Webhook endpoint (empty = log-only dry-run)                                                           |
-| `WEBHOOK_SECRET`        | No       | —                  | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                  |
-| `NOTIFIERS`             | No       | —                  | Active notification backends (e.g. `webhook`). Empty = dry-run                                        |
-| `POLLER_ENABLED`        | No       | `true`             | Set to `false` to disable the poller container entirely                                               |
-| `REMOTE_CLIENT_ENABLED` | No       | `true`             | Set to `false` to disable ib-gateway, novnc, remote-client, and gateway-controller (poller-only mode) |
-| `DROPLET_SIZE`          | No       | —                  | Override droplet size slug (e.g. `s-1vcpu-512mb`). Ignores `JAVA_HEAP_SIZE` when set                  |
-| `POLL_INTERVAL_SECONDS` | No       | `600`              | Flex poll interval (seconds)                                                                          |
-| `LISTENER_ENABLED`      | No       | —                  | Set to any non-empty value to enable real-time trade event listener                                   |
-| `LISTENER_EVENT_DEBOUNCE_TIME` | No | `0`               | Debounce window in ms for `commissionReportEvent` fills. `0` = immediate dispatch                     |
-| `TIME_ZONE`             | No       | `America/New_York` | Timezone (tz database format)                                                                         |
+| Variable                       | Required | Default            | Description                                                                                           |
+| ------------------------------ | -------- | ------------------ | ----------------------------------------------------------------------------------------------------- |
+| `DO_API_TOKEN`                 | Yes      | —                  | DigitalOcean API token                                                                                |
+| `TWS_USERID`                   | Yes      | —                  | IBKR account username                                                                                 |
+| `TWS_PASSWORD`                 | Yes      | —                  | IBKR account password                                                                                 |
+| `TRADING_MODE`                 | No       | `paper`            | `paper` or `live`                                                                                     |
+| `VNC_SERVER_PASSWORD`          | Yes      | —                  | Password for noVNC browser access                                                                     |
+| `VNC_DOMAIN`                   | Yes      | —                  | Domain for VNC access (see [Domains & HTTPS](#domains--https))                                        |
+| `SITE_DOMAIN`                  | Yes      | —                  | Domain for trade API (see [Domains & HTTPS](#domains--https))                                         |
+| `API_TOKEN`                    | Yes      | —                  | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)                                         |
+| `IBKR_FLEX_TOKEN`              | Yes      | —                  | Flex Web Service token (from Client Portal)                                                           |
+| `IBKR_FLEX_QUERY_ID`           | Yes      | —                  | Flex Query ID (Trade Confirmation or Activity)                                                        |
+| `TARGET_WEBHOOK_URL`           | No       | —                  | Webhook endpoint (empty = log-only dry-run)                                                           |
+| `WEBHOOK_SECRET`               | No       | —                  | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                  |
+| `NOTIFIERS`                    | No       | —                  | Active notification backends (e.g. `webhook`). Empty = dry-run                                        |
+| `POLLER_ENABLED`               | No       | `true`             | Set to `false` to disable the poller container entirely                                               |
+| `REMOTE_CLIENT_ENABLED`        | No       | `true`             | Set to `false` to disable ib-gateway, novnc, remote-client, and gateway-controller (poller-only mode) |
+| `DROPLET_SIZE`                 | No       | —                  | Override droplet size slug (e.g. `s-1vcpu-512mb`). Ignores `JAVA_HEAP_SIZE` when set                  |
+| `POLL_INTERVAL_SECONDS`        | No       | `600`              | Flex poll interval (seconds)                                                                          |
+| `LISTENER_ENABLED`             | No       | —                  | Set to any non-empty value to enable real-time trade event listener                                   |
+| `LISTENER_EVENT_DEBOUNCE_TIME` | No       | `0`                | Debounce window in ms for `commissionReportEvent` fills. `0` = immediate dispatch                     |
+| `TIME_ZONE`                    | No       | `America/New_York` | Timezone (tz database format)                                                                         |
 
 ## Webhook Payload
 
@@ -905,11 +905,11 @@ If you notice any mistakes in the webhook payload or field mapping, please [open
 IBKR uses different field names for the same identifiers across its APIs. This table maps them:
 
 | Concept                | TWS / ib_async | Flex Activity (AF) | Flex Trade Confirm (TC) | Notes                                                                                                                            |
-| ---------------------- | -------------- | ------------------ | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| ---------------------- | -------------- | ------------------ | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- | --- |
 | **Permanent order ID** | `permId`       | `ibOrderID`        | `orderID`               | Account-wide, survives reconnects. The only reliable cross-session order identifier. Exposed as `orderId` in this project's API. |
 | Session order ID       | `orderId`      | —                  | —                       | Client-scoped `int`, resets on reconnect. Not used in this project.                                                              |
 | Execution / fill ID    | `execId`       | `ibExecID`         | `execID`                | Per-fill unique ID. Format: `hex.hex.seq.seq`. Join key between real-time and Flex at the fill level.                            |
-| Transaction ID         | —              | `transactionId`    | —                       | Flex-only monotonic ID. Fallback dedup key when `ibExecId` is absent.                                |                                                             |
+| Transaction ID         | —              | `transactionId`    | —                       | Flex-only monotonic ID. Fallback dedup key when `ibExecId` is absent.                                                            |     |
 | Trade ID               | —              | `tradeID`          | —                       | Flex reporting grouping key. No real-time equivalent.                                                                            |
 | Brokerage order ID     | —              | `brokerageOrderID` | —                       | IBKR internal routing ID.                                                                                                        |
 | Exchange order ID      | —              | `exchOrderId`      | —                       | ID assigned by the exchange.                                                                                                     |
