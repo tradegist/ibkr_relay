@@ -159,6 +159,7 @@ These are non-negotiable. Every rule below applies from the first commit.
 - **No logging of secrets** — never log API keys, passwords, or tokens. Log actions and outcomes, not credential values.
 - **`.env`, `*.tfvars`, `.env.test` are gitignored** — never commit them. Provide `.env.example` / `.env.test.example` with placeholder values.
 - **Terraform state is gitignored** — `terraform.tfstate` contains sensitive data.
+- **Auth middleware must reject empty `API_TOKEN`.** `hmac.compare_digest("", "")` returns `True`, so an empty `API_TOKEN` env var silently disables authentication. Every auth middleware must check `if not _API_TOKEN:` and return HTTP 500 **before** reaching `compare_digest`. `API_TOKEN` is in `required_env` for deploy/sync — the CLI will block deployment if it is missing or empty.
 
 ### 3.3 Type Safety
 
@@ -190,11 +191,13 @@ These are non-negotiable. Every rule below applies from the first commit.
 
 - **Assume concurrency by default.** The listener is async (aiohttp). Any handler can be interrupted at an `await`.
 - **Never use TOCTOU patterns with locks.** Lock acquisition must BE the check.
+- **Never share a `sqlite3.Connection` across threads.** Do NOT create connections on the main (event-loop) thread and pass them into `asyncio.to_thread()` — even with `check_same_thread=False`, this is cross-thread use and unsafe. Instead, `poll_once()` accepts `dedup_conn=None, meta_conn=None` and creates thread-local connections internally, closing them in a `finally` block. Callers (`_poll_loop`, `handle_run_poll`, `poll_loop`, `handle_run`) pass only non-DB arguments. This ensures every `to_thread` call uses connections that were both created and closed on the same worker thread.
 - **Financial operations require extra scrutiny** for race conditions, double-execution, partial failure, and idempotency.
 
 ### 3.6 Error Handling
 
-- **Never assume a default for financial enum fields.** When mapping external data to a constrained set (e.g. buy/sell side, order type), validate that the value is an exact match. Never use an `else` branch that silently assigns a default — e.g. `BuySell.BUY if x == "buy" else BuySell.SELL` treats *any* non-buy value (including typos, nulls, and garbage) as SELL. Always check every valid value explicitly and raise/error on unknown input.
+- **Never assume a default for financial enum fields.** When mapping external data to a constrained set (e.g. buy/sell side, order type), validate that the value is an exact match. Never use an `else` branch that silently assigns a default — e.g. `BuySell.BUY if x == "buy" else BuySell.SELL` treats _any_ non-buy value (including typos, nulls, and garbage) as SELL. Always check every valid value explicitly and raise/error on unknown input.
+- **Never silently drop rows with missing identifiers.** When parsing external data (REST JSON, WebSocket messages, XML), if a required identifier (e.g. `execId`) is missing or empty after all fallback chains, report it as a parse error and skip the row explicitly. Do not let it fall through to a later guard (like a dedup check on empty string) where the drop is invisible. Every skipped row must produce an error message explaining why it was skipped.
 
 ### 3.7 Reliability
 
@@ -460,6 +463,18 @@ kraken-listener:
 
 `kraken-listener` and `kraken-poller` only. Caddy is provided by the existing
 stack on the droplet.
+
+### Routes Package Name Collision (KNOWN ISSUE)
+
+Both `services/listener/routes/` and `services/poller/routes/` define a package named `routes` with a `create_routes()` function. Each service's `main.py` does `from routes import create_routes`. This works today because:
+
+- **Docker isolates at runtime** — each container only has its own service on `sys.path`.
+- **mypy uses separate invocations** per service with the correct service directory first in `MYPYPATH`.
+- **pytest** runs a single invocation but tests don't import `main.py` directly.
+
+**This will break if both services share the same `sys.path`** — e.g. merging relays into a mono-repo, combined test runs, or a single container. Python will resolve `from routes import create_routes` to whichever `routes/` appears first on `sys.path` (currently `services/listener/` per the `.pth` file).
+
+**When restructuring:** rename the packages to service-specific names (`listener_routes/`, `poller_routes/`) or nest them inside a parent package (`listener.routes`, `poller.routes`). Update `main.py` imports, `pyproject.toml` paths, Dockerfile `COPY` directives, and Docker Compose volume mounts accordingly.
 
 ---
 
