@@ -94,6 +94,10 @@ class WebhookPayloadTrades(BaseModel):
     data: list[Trade]
     errors: list[str]
 
+# Backward-compatible top-level alias kept for existing imports and the
+# intended discriminated-union API. Today there is only one webhook payload
+# variant, so the alias points directly to the trades payload model.
+WebhookPayload = WebhookPayloadTrades
 
 def _dedup_id(fill: Fill) -> str:
     """Return the dedup key for a fill.
