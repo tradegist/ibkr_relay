@@ -12,6 +12,7 @@ SAMPLE_TRADES = [
     Trade(
         source="flex",
         symbol="AAPL",
+        assetClass="equity",
         side=BuySell.BUY,
         volume=10.0,
         price=187.5200,
@@ -27,6 +28,7 @@ SAMPLE_TRADES = [
     Trade(
         source="flex",
         symbol="TSLA",
+        assetClass="equity",
         side=BuySell.SELL,
         volume=-5.0,
         price=364.4400,
@@ -42,6 +44,7 @@ SAMPLE_TRADES = [
     Trade(
         source="flex",
         symbol="MSFT",
+        assetClass="equity",
         side=BuySell.BUY,
         volume=3.0,
         price=425.1000,

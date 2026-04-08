@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+AssetClass = Literal["equity", "option", "crypto", "future"]
+
 OrderType = Literal["market", "limit", "stop", "stop_limit", "trailing_stop"]
 
 # IBKR order type strings → normalized OrderType.
@@ -28,6 +30,24 @@ def normalize_order_type(raw: str) -> OrderType | None:
     return _ORDER_TYPE_MAP.get(raw)
 
 
+# IBKR asset category / secType → normalized AssetClass.
+# Used by both the Flex parser (assetCategory attr) and the listener (contract.secType).
+_ASSET_CLASS_MAP: dict[str, AssetClass] = {
+    "STK": "equity",
+    "OPT": "option",
+    "FUT": "future",
+    "CRYPTO": "crypto",
+}
+
+
+def normalize_asset_class(raw: str) -> AssetClass | None:
+    """Map an IBKR asset category string to the normalized AssetClass literal.
+
+    Returns None when the raw value is not in the known mapping.
+    """
+    return _ASSET_CLASS_MAP.get(raw)
+
+
 class BuySell(str, Enum):
     BUY = "buy"
     SELL = "sell"
@@ -44,6 +64,7 @@ class Fill(BaseModel):
     execId: str
     orderId: str
     symbol: str
+    assetClass: AssetClass
     side: BuySell
     orderType: OrderType | None = None
     price: float
@@ -62,6 +83,7 @@ class Trade(BaseModel):
 
     orderId: str
     symbol: str
+    assetClass: AssetClass
     side: BuySell
     orderType: OrderType | None = None
     price: float
@@ -145,6 +167,7 @@ def aggregate_fills(fills: list[Fill]) -> list[Trade]:
         trades.append(Trade(
             orderId=last.orderId,
             symbol=last.symbol,
+            assetClass=last.assetClass,
             side=last.side,
             orderType=last.orderType,
             price=round(avg_price, 8),

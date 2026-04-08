@@ -18,6 +18,15 @@
         "symbol": {
           "type": "string"
         },
+        "assetClass": {
+          "enum": [
+            "equity",
+            "option",
+            "crypto",
+            "future"
+          ],
+          "type": "string"
+        },
         "side": {
           "$ref": "#/$defs/BuySell"
         },
@@ -79,6 +88,7 @@
       "required": [
         "orderId",
         "symbol",
+        "assetClass",
         "side",
         "price",
         "volume",
@@ -142,6 +152,15 @@
         "symbol": {
           "type": "string"
         },
+        "assetClass": {
+          "enum": [
+            "equity",
+            "option",
+            "crypto",
+            "future"
+          ],
+          "type": "string"
+        },
         "side": {
           "$ref": "#/$defs/BuySell"
         },
@@ -195,6 +214,7 @@
         "execId",
         "orderId",
         "symbol",
+        "assetClass",
         "side",
         "price",
         "volume",

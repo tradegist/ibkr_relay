@@ -347,17 +347,18 @@ The listener is an **opt-in** feature (`LISTENER_ENABLED` env var) that subscrib
 - **Prune** — the listener prunes the dedup DB at startup and every 24 hours via `_schedule_prune()` → `_run_scheduled_prune()` → reschedule cycle using `call_later`. 30-day retention.
 - **Async dispatch** — `asyncio.ensure_future(asyncio.to_thread(notify, ...))` fire-and-forget. The `notify()` function uses synchronous `httpx.post`, so it runs in a thread to avoid blocking the ib_async event loop.
 - **Side mapping**: `"BOT"` → `BuySell.BUY`, `"SLD"` → `BuySell.SELL`.
+- **Asset class mapping**: Both the flex parser and listener map IBKR asset categories to `AssetClass = Literal["equity", "option", "crypto", "future"]` via `_ASSET_CLASS_MAP`: `STK → equity`, `OPT → option`, `FUT → future`, `CRYPTO → crypto`. Unknown values produce a parse error (flex) or `ValueError` (listener) — never assume a default.
 - **UNSET sentinel**: ib_async uses `1.7976931348623157e308` for unset floats — the listener treats this as `0.0`.
 
 ## Models (Three Locations)
 
 This project has **three model locations** — a shared source of truth and two service-specific files:
 
-| File                                             | Domain                | Contains                                                                                                                        |
-| ------------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `services/shared/__init__.py`                    | CommonFill (outbound) | `Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`, `OrderType`, `Source`, `aggregate_fills()`, `_dedup_id()` |
-| `services/poller/models_poller.py`               | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                                                  |
-| `services/remote-client/models_remote_client.py` | Order API (inbound)   | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types                                   |
+| File                                             | Domain                | Contains                                                                                                                                      |
+| ------------------------------------------------ | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `services/shared/__init__.py`                    | CommonFill (outbound) | `Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `aggregate_fills()`, `_dedup_id()` |
+| `services/poller/models_poller.py`               | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                                                                |
+| `services/remote-client/models_remote_client.py` | Order API (inbound)   | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types                                                 |
 
 - **`services/shared/__init__.py`** is the single source of truth for all webhook payload models. Both poller and remote-client import from it.
 - **Unique filenames** (`models_poller.py`, `models_remote_client.py`) prevent import collisions when both `services/poller/` and `services/remote-client/` are on `sys.path` (via the `.pth` file). Use `from shared import Fill` for shared types, `from models_poller import RunPollResponse` for poller-specific types.
