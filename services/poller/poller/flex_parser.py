@@ -118,6 +118,11 @@ def parse_fills(xml_text: str) -> tuple[list[Fill], list[str]]:
                 or raw.get("transactionId", "")
                 or raw.get("tradeID", "")
             )
+            if not exec_id:
+                errors.append(
+                    f"Skipping <{tag}>: no execId (ibExecId, transactionId, tradeID all empty)"
+                )
+                continue
 
             # Map buySell to BuySell enum
             side_str = str(raw.get("buySell", ""))
@@ -147,7 +152,7 @@ def parse_fills(xml_text: str) -> tuple[list[Fill], list[str]]:
                 continue
 
             # Dedup within this XML document
-            if not fill.execId or fill.execId in seen:
+            if fill.execId in seen:
                 continue
             seen.add(fill.execId)
 

@@ -387,6 +387,36 @@ class TestDebounceDifferentOrdersIndependent:
         assert symbols == {"AAPL", "TSLA"}
 
 
+class TestDebounceEnqueueDedup:
+    """Duplicate execIds within the same debounce window are deduplicated on enqueue."""
+
+    @patch("client.listener.notify")
+    def test_same_exec_id_enqueued_twice(self, mock_notify: MagicMock) -> None:
+        """Same commissionReportEvent arriving twice within the window produces 1 fill."""
+        ib = MagicMock()
+        ns = ListenerNamespace(ib, notifiers=[MagicMock()], db=_dedup_db(), debounce_ms=100)
+
+        ib_trade = _mock_ib_trade(symbol="NVDA", permId=10)
+        cr = _mock_commission_report(commission=0.50)
+        fill = _mock_fill(commissionReport=cr, execId="DUP1", shares=10.0, price=100.0)
+
+        loop = asyncio.new_event_loop()
+        try:
+            # Enqueue the same fill twice (e.g. reconnect replay within window)
+            loop.call_soon(lambda: ns._on_commission_report(ib_trade, fill, cr))
+            loop.call_soon(lambda: ns._on_commission_report(ib_trade, fill, cr))
+            loop.run_until_complete(asyncio.sleep(0.3))
+        finally:
+            loop.close()
+
+        mock_notify.assert_called_once()
+        payload = mock_notify.call_args[0][1]
+        trade = payload.trades[0]
+        assert trade.fillCount == 1
+        assert trade.execIds == ["DUP1"]
+        assert trade.volume == 10.0
+
+
 class TestDebounceDedup:
     """Debounce flush filters out already-processed fills."""
 

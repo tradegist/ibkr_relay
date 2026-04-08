@@ -131,7 +131,8 @@ class ListenerNamespace:
         self._debounce_s = debounce_ms / 1000.0
 
         # Debounce state (only used when debounce_ms > 0)
-        self._pending: dict[str, list[Fill]] = {}
+        # _pending: orderId → {execId → Fill} — dict prevents duplicates
+        self._pending: dict[str, dict[str, Fill]] = {}
         self._timers: dict[str, asyncio.TimerHandle] = {}
 
     _PRUNE_INTERVAL = 86400  # 24 hours
@@ -213,7 +214,7 @@ class ListenerNamespace:
             fill.side.value, fill.volume, fill.symbol,
             fill.execId, order_id,
         )
-        self._pending.setdefault(order_id, []).append(fill)
+        self._pending.setdefault(order_id, {})[fill.execId] = fill
 
         # Cancel existing timer and start a new one
         existing = self._timers.pop(order_id, None)
@@ -226,9 +227,10 @@ class ListenerNamespace:
 
     def _flush(self, order_id: str) -> None:
         """Flush buffered fills for an orderId: dedup → aggregate → dispatch."""
-        fills = self._pending.pop(order_id, [])
+        pending = self._pending.pop(order_id, {})
         self._timers.pop(order_id, None)
 
+        fills = list(pending.values())
         if not fills:
             return
 

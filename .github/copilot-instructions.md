@@ -50,14 +50,14 @@
 
 ## Error Handling (MANDATORY)
 
-- **Every error must produce a clear, actionable message.** Whether the consumer is an API caller or a developer reading logs, the error must explain *what* failed and *why*. Never raise or return a generic "something went wrong" — include the relevant context (operation, input identifier, upstream status code, etc.).
+- **Every error must produce a clear, actionable message.** Whether the consumer is an API caller or a developer reading logs, the error must explain _what_ failed and _why_. Never raise or return a generic "something went wrong" — include the relevant context (operation, input identifier, upstream status code, etc.).
 - **API responses must never leak internal details.** Return structured error JSON with an appropriate HTTP status code and a human-readable `error` field. Never expose raw Python tracebacks, file paths, or internal class names to API callers. Log the full exception server-side at `error`/`exception` level for debugging.
 - **Isolate failures — one bad component must not take down the system.** When dispatching to multiple backends, plugins, or external services, wrap each call in `try/except Exception`, log the failure, and continue. A single broken notifier, webhook endpoint, or third-party API must not crash the poll cycle, block other notifiers, or kill the HTTP server.
 - **Never silently swallow errors.** Every `except` block must either log the exception (`log.exception(...)`) or re-raise. A bare `except: pass` is never acceptable — it hides bugs and makes debugging impossible.
 - **Use `log.exception()` for unexpected errors.** It automatically includes the traceback at `ERROR` level. Reserve `log.error()` for known/expected failure conditions where a traceback would be noise.
 - **Distinguish recoverable from fatal errors.** Recoverable errors (network timeout, temporary API failure) should be logged and retried or skipped. Fatal errors (missing required config, corrupted state) should fail fast with `raise SystemExit(1)` or `die()` and a clear message — do not attempt to limp along.
 - **Validate at system boundaries, trust internally.** Validate all external inputs (API payloads, env vars, webhook data, IB Gateway responses) at the point of entry. Once validated, internal code should not re-validate — the type system and Pydantic models carry the guarantees.
-- **Never assume a default for financial enum fields.** When mapping external data to a constrained set (e.g. buy/sell side, order type), validate that the value is an exact match. Never use an `else` branch that silently assigns a default — e.g. `BuySell.BUY if x == "buy" else BuySell.SELL` treats *any* non-buy value (including typos, nulls, and garbage) as SELL. Always check every valid value explicitly and raise/error on unknown input. This applies to all trade direction, order type, asset class, and similar mappings.
+- **Never assume a default for financial enum fields.** When mapping external data to a constrained set (e.g. buy/sell side, order type), validate that the value is an exact match. Never use an `else` branch that silently assigns a default — e.g. `BuySell.BUY if x == "buy" else BuySell.SELL` treats _any_ non-buy value (including typos, nulls, and garbage) as SELL. Always check every valid value explicitly and raise/error on unknown input. This applies to all trade direction, order type, asset class, and similar mappings.
 - **HTTP handlers must catch and map exceptions.** Every route handler must have a top-level `try/except` that catches unexpected errors and returns a proper HTTP error response (500 with structured JSON). Unhandled exceptions in aiohttp handlers produce ugly default responses and can leak internals.
 - **Include context in error messages.** Bad: `"Failed to place order"`. Good: `"Failed to place order: TSLA BUY 2 LMT @ 150.0 — IB Gateway returned error code 201: 'Order rejected'"`. The message should contain enough detail to diagnose without consulting logs.
 
@@ -108,14 +108,14 @@
 
 Six Docker containers in a single Compose stack on a DigitalOcean droplet:
 
-| Service              | Role                                                                           |
-| -------------------- | ------------------------------------------------------------------------------ |
-| `ib-gateway`         | IBKR Gateway (gnzsnz/ib-gateway). Restart policy: `on-failure` (not `always`). |
-| `novnc`              | Browser VNC proxy for 2FA authentication                                       |
-| `caddy`              | Reverse proxy with automatic HTTPS (Let's Encrypt)                             |
-| `remote-client`     | Python API server — places orders via IB Gateway, optional real-time listener. Disabled (with entire gateway stack) via `REMOTE_CLIENT_ENABLED=false` |
-| `poller`             | Polls IBKR Flex for trade confirmations, fires webhooks. Disabled via `POLLER_ENABLED=false` |
-| `gateway-controller` | Lightweight sidecar — starts ib-gateway container via Docker socket            |
+| Service              | Role                                                                                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ib-gateway`         | IBKR Gateway (gnzsnz/ib-gateway). Restart policy: `on-failure` (not `always`).                                                                        |
+| `novnc`              | Browser VNC proxy for 2FA authentication                                                                                                              |
+| `caddy`              | Reverse proxy with automatic HTTPS (Let's Encrypt)                                                                                                    |
+| `remote-client`      | Python API server — places orders via IB Gateway, optional real-time listener. Disabled (with entire gateway stack) via `REMOTE_CLIENT_ENABLED=false` |
+| `poller`             | Polls IBKR Flex for trade confirmations, fires webhooks. Disabled via `POLLER_ENABLED=false`                                                          |
+| `gateway-controller` | Lightweight sidecar — starts ib-gateway container via Docker socket                                                                                   |
 
 All secrets are injected via `.env` → `environment` in `docker-compose.yml`.
 Caddy reads `VNC_DOMAIN` and `SITE_DOMAIN` from env vars — the Caddyfile uses `{$VNC_DOMAIN}` / `{$SITE_DOMAIN}` syntax.
@@ -134,6 +134,7 @@ infra/caddy/
 ```
 
 Shared projects deploy snippets to `/opt/caddy-shared/{sites,domains}/` on the droplet (not into the host project's directory). The host Caddy mounts both:
+
 - `./infra/caddy/sites/` → `/etc/caddy/sites/` (host project's own routes)
 - `/opt/caddy-shared/sites/` → `/etc/caddy/shared-sites/` (shared projects' routes)
 - Same pattern for `domains/` and `shared-domains/`.
@@ -336,11 +337,11 @@ The listener is an **opt-in** feature (`LISTENER_ENABLED` env var) that subscrib
 
 This project has **three model locations** — a shared source of truth and two service-specific files:
 
-| File                                             | Domain                      | Contains                                                                                      |
-| ------------------------------------------------ | --------------------------- | --------------------------------------------------------------------------------------------- |
-| `services/shared/__init__.py`                    | CommonFill (outbound)       | `Fill`, `Trade`, `WebhookPayload`, `BuySell`, `OrderType`, `Source`, `aggregate_fills()`, `_dedup_id()` |
-| `services/poller/models_poller.py`               | Poller API (outbound)       | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                 |
-| `services/remote-client/models_remote_client.py` | Order API (inbound)         | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types |
+| File                                             | Domain                | Contains                                                                                                |
+| ------------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------- |
+| `services/shared/__init__.py`                    | CommonFill (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell`, `OrderType`, `Source`, `aggregate_fills()`, `_dedup_id()` |
+| `services/poller/models_poller.py`               | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                          |
+| `services/remote-client/models_remote_client.py` | Order API (inbound)   | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types           |
 
 - **`services/shared/__init__.py`** is the single source of truth for all webhook payload models. Both poller and remote-client import from it.
 - **Unique filenames** (`models_poller.py`, `models_remote_client.py`) prevent import collisions when both `services/poller/` and `services/remote-client/` are on `sys.path` (via the `.pth` file). Use `from shared import Fill` for shared types, `from models_poller import RunPollResponse` for poller-specific types.
@@ -405,6 +406,7 @@ All relay projects export TypeScript types using a two-tier namespace pattern:
 - **`types/<module>/`** → exported as **`<RelayName><ModuleName>`** (e.g. `IbkrPoller`, `IbkrHttp`). Contains service-specific types generated from that module's `SCHEMA_MODELS`. Only created when a service has unique types not in shared.
 
 The barrel `types/index.d.ts` ties them together:
+
 ```ts
 import * as Ibkr from "./shared";
 import * as IbkrPoller from "./poller";
@@ -413,6 +415,7 @@ export { Ibkr, IbkrPoller, IbkrHttp };
 ```
 
 A relay with no service-specific types (e.g. kraken_relay) has only the shared namespace:
+
 ```ts
 export * as Kraken from "./shared";
 ```

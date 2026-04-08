@@ -424,10 +424,11 @@ class TestDedup:
         assert len(fills) == 2
 
     def test_fill_with_no_id_skipped(self) -> None:
-        """A fill with no transactionId, ibExecId, or tradeID is skipped."""
+        """A fill with no transactionId, ibExecId, or tradeID is skipped with an error."""
         xml = _wrap_af('<Trade buySell="BUY" symbol="AAPL" />')
-        fills, _ = parse_fills(xml)
+        fills, errors = parse_fills(xml)
         assert len(fills) == 0
+        assert any("no execId" in e for e in errors)
 
     def test_cross_format_dedup(self) -> None:
         """Same trade in both <Trade> and <TradeConfirm> is deduped by ibExecId."""
