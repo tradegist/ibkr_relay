@@ -347,6 +347,7 @@ When orders fill, the relay POSTs a JSON payload with all trades batched into a 
     {
       "orderId": "684196618",
       "symbol": "AAPL",
+      "assetClass": "equity",
       "side": "buy",
       "orderType": "market",
       "price": 254.6,
@@ -387,6 +388,7 @@ All exchange relays (IBKR, Kraken, etc.) use the same **CommonFill** model. The 
 | ----------- | ------------------- | ----------------------------------------------------------------------------------------- |
 | `orderId`   | `string`            | Permanent order identifier (unique per account)                                           |
 | `symbol`    | `string`            | Instrument symbol                                                                         |
+| `assetClass`| `AssetClass`        | `"equity"`, `"option"`, `"crypto"`, `"future"`, `"forex"`, or `"other"`                  |
 | `side`      | `"buy" \| "sell"`   | Trade direction (lowercase)                                                               |
 | `orderType` | `OrderType \| null` | Normalized: `"market"`, `"limit"`, `"stop"`, `"stop_limit"`, `"trailing_stop"`, or `null` |
 | `price`     | `number`            | VWAP when aggregated, single fill price otherwise                                         |

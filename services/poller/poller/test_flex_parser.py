@@ -173,6 +173,45 @@ class TestParseFillsBasic:
         assert len(errors) == 1
         assert "Failed to create Fill" in errors[0]
 
+    def test_unknown_assetCategory_produces_other(self) -> None:
+        """An unrecognised assetCategory should produce a fill with assetClass='other' and a warning."""
+        xml = _wrap_af(
+            '<Trade transactionID="999" symbol="X" assetCategory="CFD"'
+            ' buySell="BUY" quantity="1" tradePrice="10" />'
+        )
+        fills, errors = parse_fills(xml)
+        assert len(fills) == 1
+        assert fills[0].assetClass == "other"
+        assert any("Unknown assetCategory 'CFD'" in e for e in errors)
+
+    def test_missing_assetCategory_produces_other(self) -> None:
+        """A fill with no assetCategory at all should produce assetClass='other' with a warning."""
+        xml = _wrap_af(
+            '<Trade transactionID="888" symbol="Y"'
+            ' buySell="BUY" quantity="1" tracePrice="10" />'
+        )
+        fills, errors = parse_fills(xml)
+        assert len(fills) == 1
+        assert fills[0].assetClass == "other"
+        assert any("Unknown assetCategory" in e for e in errors)
+
+    @pytest.mark.parametrize("ibkr_cat,expected", [
+        ("STK", "equity"),
+        ("OPT", "option"),
+        ("FUT", "future"),
+        ("CRYPTO", "crypto"),
+        ("CASH", "forex"),
+    ])
+    def test_asset_class_mapping(self, ibkr_cat: str, expected: str) -> None:
+        """Each known IBKR assetCategory maps to the correct AssetClass."""
+        xml = _wrap_af(
+            f'<Trade transactionID="777" symbol="Z" assetCategory="{ibkr_cat}"'
+            f' buySell="BUY" quantity="1" tradePrice="10" />'
+        )
+        fills, errors = parse_fills(xml)
+        assert len(fills) == 1, f"Expected 1 fill, got errors: {errors}"
+        assert fills[0].assetClass == expected
+
 
 # ═════════════════════════════════════════════════════════════════════════
 #  Alias / field normalization — CommonFill fields
@@ -270,6 +309,11 @@ class TestFieldNormalization:
         xml = _wrap_af(AF_AAPL)
         fills, _ = parse_fills(xml)
         assert fills[0].orderType == "market"
+
+    def test_af_assetClass_maps_to_equity(self) -> None:
+        xml = _wrap_af(AF_AAPL)
+        fills, _ = parse_fills(xml)
+        assert fills[0].assetClass == "equity"
 
 
 # ═════════════════════════════════════════════════════════════════════════

@@ -49,8 +49,8 @@ def _map_to_fill(trade: IBTrade, fill: IBFill, source: Source) -> Fill:
         raise ValueError(f"Unknown execution side: {ex.side!r}")
 
     asset_class = normalize_asset_class(c.secType)
-    if asset_class is None:
-        raise ValueError(f"Unknown secType: {c.secType!r}")
+    if asset_class == "other":
+        log.warning("Unknown secType %r for %s, using 'other'", c.secType, c.symbol)
 
     commission = 0.0
     commission_currency = ""

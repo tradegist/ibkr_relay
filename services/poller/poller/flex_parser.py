@@ -133,9 +133,8 @@ def parse_fills(xml_text: str) -> tuple[list[Fill], list[str]]:
             # Map assetCategory to AssetClass
             asset_raw = str(raw.get("assetCategory", ""))
             asset_class = normalize_asset_class(asset_raw)
-            if asset_class is None:
-                errors.append(f"Failed to create Fill from <{tag}>: unknown assetCategory {asset_raw!r}")
-                continue
+            if asset_class == "other":
+                row_errors.append(f"Unknown assetCategory {asset_raw!r}, using 'other'")
 
             # Build CommonFill
             try:

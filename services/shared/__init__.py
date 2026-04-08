@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-AssetClass = Literal["equity", "option", "crypto", "future"]
+AssetClass = Literal["equity", "option", "crypto", "future", "forex", "other"]
 
 OrderType = Literal["market", "limit", "stop", "stop_limit", "trailing_stop"]
 
@@ -37,15 +37,16 @@ _ASSET_CLASS_MAP: dict[str, AssetClass] = {
     "OPT": "option",
     "FUT": "future",
     "CRYPTO": "crypto",
+    "CASH": "forex",
 }
 
 
-def normalize_asset_class(raw: str) -> AssetClass | None:
+def normalize_asset_class(raw: str) -> AssetClass:
     """Map an IBKR asset category string to the normalized AssetClass literal.
 
-    Returns None when the raw value is not in the known mapping.
+    Returns ``"other"`` when the raw value is not in the known mapping.
     """
-    return _ASSET_CLASS_MAP.get(raw)
+    return _ASSET_CLASS_MAP.get(raw, "other")
 
 
 class BuySell(str, Enum):

@@ -347,7 +347,7 @@ The listener is an **opt-in** feature (`LISTENER_ENABLED` env var) that subscrib
 - **Prune** — the listener prunes the dedup DB at startup and every 24 hours via `_schedule_prune()` → `_run_scheduled_prune()` → reschedule cycle using `call_later`. 30-day retention.
 - **Async dispatch** — `asyncio.ensure_future(asyncio.to_thread(notify, ...))` fire-and-forget. The `notify()` function uses synchronous `httpx.post`, so it runs in a thread to avoid blocking the ib_async event loop.
 - **Side mapping**: `"BOT"` → `BuySell.BUY`, `"SLD"` → `BuySell.SELL`.
-- **Asset class mapping**: Both the flex parser and listener map IBKR asset categories to `AssetClass = Literal["equity", "option", "crypto", "future"]` via `_ASSET_CLASS_MAP`: `STK → equity`, `OPT → option`, `FUT → future`, `CRYPTO → crypto`. Unknown values produce a parse error (flex) or `ValueError` (listener) — never assume a default.
+- **Asset class mapping**: Both the flex parser and listener map IBKR asset categories to `AssetClass = Literal["equity", "option", "crypto", "future", "forex", "other"]` via `normalize_asset_class()`: `STK → equity`, `OPT → option`, `FUT → future`, `CRYPTO → crypto`, `CASH → forex`. Unknown values map to `"other"` with a warning (flex: appended to errors list; listener: `log.warning`) — fills are never dropped for an unrecognised asset class.
 - **UNSET sentinel**: ib_async uses `1.7976931348623157e308` for unset floats — the listener treats this as `0.0`.
 
 ## Models (Three Locations)
