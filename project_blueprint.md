@@ -197,6 +197,7 @@ These are non-negotiable. Every rule below applies from the first commit.
 ### 3.6 Error Handling
 
 - **Never assume a default for financial enum fields.** When mapping external data to a constrained set (e.g. buy/sell side, order type), validate that the value is an exact match. Never use an `else` branch that silently assigns a default — e.g. `BuySell.BUY if x == "buy" else BuySell.SELL` treats _any_ non-buy value (including typos, nulls, and garbage) as SELL. Always check every valid value explicitly and raise/error on unknown input.
+- **`fee` is always positive (amount paid).** IBKR Flex XML uses negative commissions; the parser normalizes with `abs()`. `Fill.fee` and `Trade.fee` always represent the positive amount paid. The raw (negative) value is preserved in `raw["commission"]`.
 - **Never silently drop rows with missing identifiers.** When parsing external data (REST JSON, WebSocket messages, XML), if a required identifier (e.g. `execId`) is missing or empty after all fallback chains, report it as a parse error and skip the row explicitly. Do not let it fall through to a later guard (like a dedup check on empty string) where the drop is invisible. Every skipped row must produce an error message explaining why it was skipped.
 
 ### 3.7 Reliability
@@ -647,7 +648,7 @@ class Fill(BaseModel):
     price: float
     volume: float
     cost: float
-    fee: float
+    fee: float                   # Always positive (amount paid)
     timestamp: str               # ISO 8601 ("2025-04-07T10:30:00Z")
     source: Source               # Origin: "ws_execution" or "rest_poll"
     raw: dict[str, Any]          # Original exchange payload, unmodified
@@ -682,7 +683,7 @@ class Trade(BaseModel):
     price: float                 # Volume-weighted average price (VWAP)
     volume: float                # Total volume across fills
     cost: float                  # Total cost
-    fee: float                   # Total fees
+    fee: float                   # Total fees (always positive — amount paid)
     fillCount: int
     execIds: list[str]           # All execution IDs in this trade
     timestamp: str               # ISO timestamp of latest fill

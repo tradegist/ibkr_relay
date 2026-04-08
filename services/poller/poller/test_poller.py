@@ -521,7 +521,7 @@ class TestPollOnceE2E:
         assert t.volume == pytest.approx(15.0)
         # Weighted avg price: (10*150.5 + 5*151.0) / 15 = 2260/15
         assert t.price == pytest.approx(2260 / 15, rel=1e-6)
-        assert t.fee == pytest.approx(-1.5)
+        assert t.fee == pytest.approx(1.5)
         assert t.execIds == ["exec.001", "exec.002"]
 
         # Webhook sent with the aggregated trade

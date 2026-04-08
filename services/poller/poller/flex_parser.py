@@ -142,7 +142,7 @@ def parse_fills(xml_text: str) -> tuple[list[Fill], list[str]]:
                     price=float(raw.get("price", 0.0)),
                     volume=float(raw.get("quantity", 0.0)),
                     cost=float(raw.get("cost", 0.0)),
-                    fee=float(raw.get("commission", 0.0)),
+                    fee=abs(float(raw.get("commission", 0.0))),
                     timestamp=str(raw.get("dateTime", "")),
                     source="flex",
                     raw=raw,

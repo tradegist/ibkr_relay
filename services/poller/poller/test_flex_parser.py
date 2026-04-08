@@ -184,7 +184,7 @@ class TestFieldNormalization:
     def test_af_ibCommission_maps_to_fee(self) -> None:
         xml = _wrap_af(AF_AAPL)
         fills, _ = parse_fills(xml)
-        assert fills[0].fee == pytest.approx(-0.62125)
+        assert fills[0].fee == pytest.approx(0.62125)
 
     def test_af_ibCommission_preserved_in_raw(self) -> None:
         xml = _wrap_af(AF_AAPL)
@@ -249,7 +249,7 @@ class TestFieldNormalization:
     def test_tc_commission_maps_to_fee(self) -> None:
         xml = _wrap_tc(TC_AAPL)
         fills, _ = parse_fills(xml)
-        assert fills[0].fee == pytest.approx(-0.62125)
+        assert fills[0].fee == pytest.approx(0.62125)
 
     def test_af_buySell_maps_to_side(self) -> None:
         xml = _wrap_af(AF_AAPL)
@@ -347,12 +347,12 @@ class TestFloatParsing:
         assert fills[0].volume == pytest.approx(42.5)
         assert fills[0].price == pytest.approx(100.25)
 
-    def test_negative_float(self) -> None:
+    def test_negative_commission_normalized_to_positive(self) -> None:
         xml = _wrap_af(
             '<Trade transactionID="1" buySell="BUY" ibCommission="-1.5" />'
         )
         fills, _ = parse_fills(xml)
-        assert fills[0].fee == pytest.approx(-1.5)
+        assert fills[0].fee == pytest.approx(1.5)
 
     def test_zero(self) -> None:
         xml = _wrap_af('<Trade transactionID="1" buySell="BUY" taxes="0" />')
@@ -581,7 +581,7 @@ class TestAllFieldsRoundTrip:
         assert f.price == pytest.approx(254.6)
         assert f.volume == pytest.approx(1.0)
         assert f.cost == pytest.approx(254.6)
-        assert f.fee == pytest.approx(-0.62125)
+        assert f.fee == pytest.approx(0.62125)
         assert f.timestamp == "20250403;153000"
         assert f.source == "flex"
 
@@ -650,7 +650,7 @@ class TestAggregateSingleFill:
         assert t.symbol == "AAPL"
         assert t.price == pytest.approx(254.6)
         assert t.volume == pytest.approx(1.0)
-        assert t.fee == pytest.approx(-0.6212)  # rounded to 4 dp
+        assert t.fee == pytest.approx(0.6212)  # rounded to 4 dp
         assert t.fillCount == 1
         assert len(t.execIds) == 1
 
@@ -687,7 +687,7 @@ class TestAggregateMultipleFills:
         assert two_fill_trade.volume == pytest.approx(30.0)
 
     def test_summed_fee(self, two_fill_trade: Trade) -> None:
-        assert two_fill_trade.fee == pytest.approx(-3.0)
+        assert two_fill_trade.fee == pytest.approx(3.0)
 
     def test_summed_cost(self, two_fill_trade: Trade) -> None:
         assert two_fill_trade.cost == pytest.approx(3200.0)
@@ -774,8 +774,8 @@ class TestAggregateEdgeCases:
         )
         fills, _ = parse_fills(xml)
         trades = aggregate_fills(fills)
-        # Sum = -1.0 exactly, but ensure rounding to 4 dp
-        assert trades[0].fee == pytest.approx(-1.0)
+        # Sum = 1.0 exactly, but ensure rounding to 4 dp
+        assert trades[0].fee == pytest.approx(1.0)
 
 
 # ═════════════════════════════════════════════════════════════════════════
