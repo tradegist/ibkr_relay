@@ -157,7 +157,7 @@ class ListenerNamespace:
 
     def _schedule_prune(self) -> None:
         """Schedule the next daily prune."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         loop.call_later(self._PRUNE_INTERVAL, self._run_scheduled_prune)
 
     def _run_scheduled_prune(self) -> None:
@@ -235,7 +235,7 @@ class ListenerNamespace:
         if existing is not None:
             existing.cancel()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         handle = loop.call_later(self._debounce_s, self._flush, order_id)
         self._timers[order_id] = handle
 
