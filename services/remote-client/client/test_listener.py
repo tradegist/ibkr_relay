@@ -192,7 +192,7 @@ class TestListenerStart:
 
 
 class TestListenerDispatchImmediate:
-    @patch("notifier.notify")
+    @patch("client.listener.notify")
     def test_exec_details_dispatches(self, mock_notify: MagicMock) -> None:
         ib = MagicMock()
         ns = ListenerNamespace(ib, notifiers=[MagicMock()], db=_dedup_db())
@@ -213,7 +213,7 @@ class TestListenerDispatchImmediate:
         assert payload.trades[0].source == "execDetailsEvent"
         assert payload.trades[0].symbol == "AAPL"
 
-    @patch("notifier.notify")
+    @patch("client.listener.notify")
     def test_commission_report_dispatches(self, mock_notify: MagicMock) -> None:
         ib = MagicMock()
         ns = ListenerNamespace(ib, notifiers=[MagicMock()], db=_dedup_db())
@@ -235,7 +235,7 @@ class TestListenerDispatchImmediate:
         assert payload.trades[0].source == "commissionReportEvent"
         assert payload.trades[0].fee == 1.5
 
-    @patch("notifier.notify")
+    @patch("client.listener.notify")
     def test_commission_report_dedup_skips_duplicate(self, mock_notify: MagicMock) -> None:
         """Second commissionReportEvent with same execId is skipped."""
         ib = MagicMock()
@@ -268,7 +268,7 @@ class TestListenerDispatchImmediate:
 class TestDebounceZeroDispatchesImmediately:
     """When debounce_ms=0, commissionReportEvent dispatches right away."""
 
-    @patch("notifier.notify")
+    @patch("client.listener.notify")
     def test_no_debounce(self, mock_notify: MagicMock) -> None:
         ib = MagicMock()
         ns = ListenerNamespace(ib, notifiers=[MagicMock()], db=_dedup_db(), debounce_ms=0)
@@ -292,7 +292,7 @@ class TestDebounceZeroDispatchesImmediately:
 class TestDebounceAggregatesRapidFills:
     """Multiple rapid fills for the same orderId are aggregated into one webhook."""
 
-    @patch("notifier.notify")
+    @patch("client.listener.notify")
     def test_two_fills_one_trade(self, mock_notify: MagicMock) -> None:
         ib = MagicMock()
         db = _dedup_db()
@@ -329,7 +329,7 @@ class TestDebounceAggregatesRapidFills:
 class TestDebounceTimerResets:
     """A new fill for the same orderId resets the debounce timer."""
 
-    @patch("notifier.notify")
+    @patch("client.listener.notify")
     def test_timer_reset(self, mock_notify: MagicMock) -> None:
         ib = MagicMock()
         ns = ListenerNamespace(ib, notifiers=[MagicMock()], db=_dedup_db(), debounce_ms=200)
@@ -363,7 +363,7 @@ class TestDebounceTimerResets:
 class TestDebounceDifferentOrdersIndependent:
     """Fills for different orderIds are debounced independently."""
 
-    @patch("notifier.notify")
+    @patch("client.listener.notify")
     def test_independent_orders(self, mock_notify: MagicMock) -> None:
         ib = MagicMock()
         ns = ListenerNamespace(ib, notifiers=[MagicMock()], db=_dedup_db(), debounce_ms=100)
@@ -390,7 +390,7 @@ class TestDebounceDifferentOrdersIndependent:
 class TestDebounceDedup:
     """Debounce flush filters out already-processed fills."""
 
-    @patch("notifier.notify")
+    @patch("client.listener.notify")
     def test_dedup_filters_already_seen(self, mock_notify: MagicMock) -> None:
         db = _dedup_db()
         # Pre-mark E1 as processed
@@ -421,7 +421,7 @@ class TestDebounceDedup:
         assert trade.execIds == ["E2"]
         assert trade.volume == 20.0
 
-    @patch("notifier.notify")
+    @patch("client.listener.notify")
     def test_all_fills_already_seen_no_dispatch(self, mock_notify: MagicMock) -> None:
         db = _dedup_db()
         db.execute("INSERT INTO processed_fills (exec_id) VALUES (?)", ("E1",))
@@ -450,7 +450,7 @@ class TestDebounceDedup:
 class TestDebounceMarksProcessed:
     """After flushing, fills are marked as processed in the DB."""
 
-    @patch("notifier.notify")
+    @patch("client.listener.notify")
     def test_marks_after_dispatch(self, mock_notify: MagicMock) -> None:
         db = _dedup_db()
         ib = MagicMock()
@@ -478,7 +478,7 @@ class TestDebounceMarksProcessed:
 class TestDebouncePendingCleanup:
     """After flush, _pending and _timers are cleaned up."""
 
-    @patch("notifier.notify")
+    @patch("client.listener.notify")
     def test_cleanup(self, mock_notify: MagicMock) -> None:
         ib = MagicMock()
         ns = ListenerNamespace(ib, notifiers=[MagicMock()], db=_dedup_db(), debounce_ms=100)
@@ -501,7 +501,7 @@ class TestDebouncePendingCleanup:
 class TestDebounceExecDetailsNotDebounced:
     """execDetailsEvent is never debounced, even when debounce_ms > 0."""
 
-    @patch("notifier.notify")
+    @patch("client.listener.notify")
     def test_exec_details_immediate(self, mock_notify: MagicMock) -> None:
         ib = MagicMock()
         ns = ListenerNamespace(ib, notifiers=[MagicMock()], db=_dedup_db(), debounce_ms=500)
@@ -531,7 +531,7 @@ class TestNotifierFailure:
 
         loop = asyncio.new_event_loop()
         try:
-            with patch("notifier.notify", side_effect=RuntimeError("boom")):
+            with patch("client.listener.notify", side_effect=RuntimeError("boom")):
                 loop.call_soon(lambda: ns._dispatch(trade))
                 loop.run_until_complete(asyncio.sleep(0.2))
             # If we get here without exception, the test passes

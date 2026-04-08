@@ -23,6 +23,7 @@ from models_poller import (
     Trade,
     WebhookPayload,
 )
+from notifier import notify
 from notifier.base import BaseNotifier
 from shared import aggregate_fills
 
@@ -267,8 +268,6 @@ class ListenerNamespace:
         shared ``self._db`` connection is never touched from multiple
         threads concurrently.
         """
-        from notifier import notify
-
         payload = WebhookPayload(trades=[trade], errors=[])
 
         async def _send_and_mark() -> None:

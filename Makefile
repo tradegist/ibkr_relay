@@ -121,8 +121,10 @@ e2e-up: ## Start E2E test stack (IB Gateway + remote-client + poller)
 	else \
 		$(E2E_COMPOSE) up -d --build; \
 		echo "Waiting for remote-client to connect to IB Gateway..."; \
+		rc_ready=false; \
 		for i in $$(seq 1 12); do \
 			if curl -sf http://localhost:15010/health | grep -q '"connected": true'; then \
+				rc_ready=true; \
 				echo "remote-client ready"; break; \
 			fi; \
 			if $(E2E_COMPOSE) logs ib-gateway 2>&1 | grep -q "Existing session detected"; then \
@@ -143,13 +145,23 @@ e2e-up: ## Start E2E test stack (IB Gateway + remote-client + poller)
 			fi; \
 			sleep 10; \
 		done; \
+		if [ "$$rc_ready" != "true" ]; then \
+			echo "ERROR: remote-client did not connect to IB Gateway within 120s"; \
+			exit 1; \
+		fi; \
 		echo "Waiting for poller..."; \
+		poller_ready=false; \
 		for i in $$(seq 1 10); do \
 			if curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
+				poller_ready=true; \
 				echo "poller ready"; break; \
 			fi; \
 			sleep 3; \
 		done; \
+		if [ "$$poller_ready" != "true" ]; then \
+			echo "ERROR: poller did not become healthy within 30s"; \
+			exit 1; \
+		fi; \
 	fi
 
 e2e-down: ## Stop and remove E2E test stack
