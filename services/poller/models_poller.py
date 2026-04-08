@@ -7,6 +7,7 @@ Service-specific models (RunPollResponse, HealthResponse) live here.
 
 from pydantic import BaseModel, ConfigDict
 
+from shared import AssetClass as AssetClass
 from shared import BuySell as BuySell
 from shared import Fill as Fill
 from shared import OrderType as OrderType

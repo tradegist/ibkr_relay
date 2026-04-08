@@ -17,6 +17,7 @@ export interface RunPollResponse {
 export interface Trade {
   orderId: string;
   symbol: string;
+  assetClass: "equity" | "option" | "crypto" | "future" | "forex" | "other";
   side: BuySell;
   orderType?: ("market" | "limit" | "stop" | "stop_limit" | "trailing_stop") | null;
   price: number;

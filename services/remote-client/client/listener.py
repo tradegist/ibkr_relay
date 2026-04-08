@@ -25,7 +25,7 @@ from models_poller import (
 )
 from notifier import notify
 from notifier.base import BaseNotifier
-from shared import aggregate_fills
+from shared import aggregate_fills, normalize_asset_class
 
 log = logging.getLogger("ib-listener")
 
@@ -33,7 +33,6 @@ _SIDE_MAP: dict[str, BuySell] = {
     "BOT": BuySell.BUY,
     "SLD": BuySell.SELL,
 }
-
 
 _UNSET = 1.7976931348623157e308  # ib_async sentinel for unset floats
 
@@ -48,6 +47,10 @@ def _map_to_fill(trade: IBTrade, fill: IBFill, source: Source) -> Fill:
     side = _SIDE_MAP.get(ex.side)
     if side is None:
         raise ValueError(f"Unknown execution side: {ex.side!r}")
+
+    asset_class = normalize_asset_class(c.secType)
+    if asset_class == "other":
+        log.warning("Unknown secType %r for %s, using 'other'", c.secType, c.symbol)
 
     commission = 0.0
     commission_currency = ""
@@ -78,6 +81,7 @@ def _map_to_fill(trade: IBTrade, fill: IBFill, source: Source) -> Fill:
         execId=ex.execId,
         orderId=str(o.permId),
         symbol=c.symbol,
+        assetClass=asset_class,
         side=side,
         orderType=None,
         price=ex.price,
@@ -95,6 +99,7 @@ def _fill_to_trade(fill: Fill) -> Trade:
     return Trade(
         orderId=fill.orderId,
         symbol=fill.symbol,
+        assetClass=fill.assetClass,
         side=fill.side,
         orderType=fill.orderType,
         price=fill.price,

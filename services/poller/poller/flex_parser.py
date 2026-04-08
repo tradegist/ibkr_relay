@@ -26,7 +26,7 @@ import xml.etree.ElementTree as ET
 from typing import Any
 
 from models_poller import BuySell, Fill
-from shared import normalize_order_type
+from shared import normalize_asset_class, normalize_order_type
 
 log = logging.getLogger("flex_parser")
 
@@ -64,7 +64,6 @@ _SIDE_MAP: dict[str, BuySell] = {
     "BUY": BuySell.BUY,
     "SELL": BuySell.SELL,
 }
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -131,12 +130,19 @@ def parse_fills(xml_text: str) -> tuple[list[Fill], list[str]]:
                 errors.append(f"Failed to create Fill from <{tag}>: unknown buySell {side_str!r}")
                 continue
 
+            # Map assetCategory to AssetClass
+            asset_raw = str(raw.get("assetCategory", ""))
+            asset_class = normalize_asset_class(asset_raw)
+            if asset_class == "other":
+                row_errors.append(f"Unknown assetCategory {asset_raw!r}, using 'other'")
+
             # Build CommonFill
             try:
                 fill = Fill(
                     execId=exec_id,
                     orderId=str(raw.get("orderId", "")),
                     symbol=str(raw.get("symbol", "")),
+                    assetClass=asset_class,
                     side=side,
                     orderType=normalize_order_type(str(raw.get("orderType", ""))),
                     price=float(raw.get("price", 0.0)),

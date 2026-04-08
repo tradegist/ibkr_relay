@@ -51,6 +51,7 @@ def _make_fill(**overrides: Any) -> Fill:
     defaults: dict[str, Any] = {
         "source": "flex",
         "symbol": "AAPL",
+        "assetClass": "equity",
         "side": BuySell.BUY,
         "volume": 1.0,
         "price": 100.0,
@@ -69,6 +70,7 @@ def _make_trade(**overrides: Any) -> Trade:
     defaults: dict[str, Any] = {
         "source": "flex",
         "symbol": "AAPL",
+        "assetClass": "equity",
         "side": BuySell.BUY,
         "volume": 1.0,
         "price": 100.0,

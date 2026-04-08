@@ -119,6 +119,17 @@ class TestMapToFillExecDetails:
         assert f.raw["assetCategory"] == "OPT"
         assert f.raw["currency"] == "EUR"
 
+    def test_unknown_secType_maps_to_other(self) -> None:
+        """Unknown secType produces assetClass='other' instead of raising."""
+        ib_trade = _mock_ib_trade(secType="CFD")
+        f = _map_to_fill(ib_trade, _mock_fill(), "execDetailsEvent")
+        assert f.assetClass == "other"
+
+    def test_empty_secType_maps_to_other(self) -> None:
+        ib_trade = _mock_ib_trade(secType="")
+        f = _map_to_fill(ib_trade, _mock_fill(), "execDetailsEvent")
+        assert f.assetClass == "other"
+
 
 class TestMapToFillCommissionReport:
     """Mapping on commissionReportEvent — includes commission data."""
