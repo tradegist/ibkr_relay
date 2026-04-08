@@ -75,14 +75,29 @@ class Trade(BaseModel):
     raw: dict[str, Any]
 
 
-class WebhookPayload(BaseModel):
-    """Payload sent to the target webhook URL."""
+def _require_discriminators(schema: dict[str, Any]) -> None:
+    """Keep discriminator fields required in JSON Schema despite defaults."""
+    req: list[str] = schema.get("required", [])
+    for f in ("relay", "type"):
+        if f not in req:
+            req.append(f)
+    schema["required"] = req
 
-    model_config = ConfigDict(extra="forbid")
 
-    trades: list[Trade]
+class WebhookPayloadTrades(BaseModel):
+    """Webhook payload for trade execution events."""
+
+    model_config = ConfigDict(extra="forbid", json_schema_extra=_require_discriminators)
+
+    relay: Literal["ibkr"] = "ibkr"
+    type: Literal["trades"] = "trades"
+    data: list[Trade]
     errors: list[str]
 
+# Backward-compatible top-level alias kept for existing imports and the
+# intended discriminated-union API. Today there is only one webhook payload
+# variant, so the alias points directly to the trades payload model.
+WebhookPayload = WebhookPayloadTrades
 
 def _dedup_id(fill: Fill) -> str:
     """Return the dedup key for a fill.
@@ -148,4 +163,4 @@ def aggregate_fills(fills: list[Fill]) -> list[Trade]:
 
 # ── Schema export (used by schema_gen.py → make types) ──────────────
 
-SCHEMA_MODELS: list[type[BaseModel]] = [WebhookPayload, Trade, Fill]
+SCHEMA_MODELS: list[type[BaseModel]] = [WebhookPayloadTrades, Trade, Fill]
