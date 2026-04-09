@@ -90,7 +90,7 @@
 - **`.venv` is the project's virtual environment.** Created by `make setup` using Homebrew Python. All dev dependencies are installed there.
 - **Auto-activation** is configured in `~/.zshrc` via a `chpwd` hook — the venv activates automatically when `cd`'ing into the project directory.
 - **`make setup`** creates the `.venv` (if missing), installs all dependencies (`requirements-dev.txt` + both service requirements), and writes a `.pth` file (see below).
-- **`ibkr-relay.pth`** is created inside `.venv/lib/pythonX.Y/site-packages/` by `make setup`. It adds `services/poller/`, `services/remote-client/`, and `services/` to `sys.path` so that `from models_poller import ...`, `from models_remote_client import ...`, and `from notifier import ...` work everywhere (CLI, tests, scripts) without `sys.path` hacks or `PYTHONPATH`.
+- **`ibkr-relay.pth`** is created inside `.venv/lib/pythonX.Y/site-packages/` by `make setup`. It adds `services/poller/`, `services/remote-client/`, `services/debug/`, and `services/` to `sys.path` so that `from models_poller import ...`, `from models_remote_client import ...`, `from debug_app import ...`, and `from notifier import ...` work everywhere (CLI, tests, scripts) without `sys.path` hacks or `PYTHONPATH`.
 - **`.venv/` is gitignored** — never commit it.
 
 ## Dependency Management
@@ -104,6 +104,7 @@
 - **Never use `env_file:` in service definitions.** Always declare each env var explicitly in the `environment:` block with `${VAR}` interpolation. This is critical because `env_file:` is internally a list — override files append rather than replace, causing the production `.env` to leak into test containers. Explicit `environment:` vars with `--env-file` interpolation keeps environments fully isolated and allows clean overrides.
 - **`POLLER_ENABLED=false`** disables the poller container entirely. Implemented via `deploy.replicas: ${POLLER_REPLICAS:-1}` in `docker-compose.yml`. The mapping from `POLLER_ENABLED` to `POLLER_REPLICAS` happens in `cli/__init__.py` (`_compose_env()`) and the Makefile (`POLLER` flag). The derived `POLLER_REPLICAS` is injected as a shell env var in the SSH command (not in `.env`), so it takes precedence over the compose file default.
 - **`REMOTE_CLIENT_ENABLED=false`** disables the entire gateway stack: `ib-gateway`, `novnc`, `remote-client`, and `gateway-controller`. Same mechanism as poller: `deploy.replicas: ${GATEWAY_REPLICAS:-1}` on all four services, mapped from `REMOTE_CLIENT_ENABLED` via `_compose_env()` and the Makefile `REMOTE_CLIENT` flag. Gateway-specific required env vars (`TWS_USERID`, `TWS_PASSWORD`, `VNC_SERVER_PASSWORD`) use `:-` defaults in compose and are validated by the CLI when the gateway is enabled.
+- **`DEBUG_WEBHOOK_PATH`** enables the `ibkr-debug` container. When set (non-empty) in `.env`, `_compose_env()` sets `DEBUG_REPLICAS=1`; otherwise the compose default `${DEBUG_REPLICAS:-0}` keeps the container stopped. The debug service has aggressive log rotation (`max-size: 10k`, `max-file: 1`) since its sole purpose is transient payload inspection. Set `DEBUG_LOG_LEVEL=DEBUG` in `.env` to include full payload+headers in `docker logs`.
 - **`.dockerignore` uses an allowlist** (`*` to exclude everything, then `!services/poller/**` to include the whole module). Tests, `__pycache__`, and the Dockerfile itself are re-excluded. This means adding new source files to `services/poller/` requires **no** `.dockerignore` or Dockerfile changes.
 - **When adding a new standalone module** (e.g. `services/notifier/`), you must add a `!services/<module>/**` entry to `.dockerignore` — the allowlist excludes everything by default. Also add exclusions for test files and `__pycache__` under the new module. Without this, `COPY services/<module>/ ./<module>/` in the Dockerfile will fail with a cryptic "not found" error.
 - The poller Dockerfile uses directory COPYs (`COPY services/poller/poller/ ./poller/`, `COPY services/poller/poller_routes/ ./poller_routes/`) so new files are picked up automatically.
@@ -112,7 +113,7 @@
 
 ## Architecture
 
-Six Docker containers in a single Compose stack on a DigitalOcean droplet:
+Seven Docker containers in a single Compose stack on a DigitalOcean droplet:
 
 | Service              | Role                                                                                                                                                  |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -122,6 +123,7 @@ Six Docker containers in a single Compose stack on a DigitalOcean droplet:
 | `remote-client`      | Python API server — places orders via IB Gateway, optional real-time listener. Disabled (with entire gateway stack) via `REMOTE_CLIENT_ENABLED=false` |
 | `poller`             | Polls IBKR Flex for trade confirmations, fires webhooks. Disabled via `POLLER_ENABLED=false`                                                          |
 | `gateway-controller` | Lightweight sidecar — starts ib-gateway container via Docker socket                                                                                   |
+| `ibkr-debug`         | Debug webhook inbox — captures webhook payloads for inspection. Disabled by default (`DEBUG_REPLICAS=0`), enabled when `DEBUG_WEBHOOK_PATH` is set    |
 
 All secrets are injected via `.env` → `environment` in `docker-compose.yml`.
 Caddy reads `VNC_DOMAIN` and `SITE_DOMAIN` from env vars — the Caddyfile uses `{$VNC_DOMAIN}` / `{$SITE_DOMAIN}` syntax.
@@ -135,6 +137,7 @@ infra/caddy/
   Caddyfile              # Shell: imports from sites/, domains/, and shared dirs
   sites/
     ibkr.caddy           # SITE_DOMAIN route handlers (handle /ibkr/*)
+    debug.caddy          # Debug webhook routes (handle /debug/webhook/*)
   domains/
     ibkr-vnc.caddy       # VNC_DOMAIN site block (full site definition)
 ```
@@ -147,7 +150,7 @@ Shared projects deploy snippets to `/opt/caddy-shared/{sites,domains}/` on the d
 
 During shared deploy, snippet files are **templated** — all `{$VAR}` placeholders are replaced with literal env var values from the shared project's `.env`. This avoids requiring the host Caddy container to have the shared project's env vars.
 
-- **`sites/*.caddy`** contain `handle` blocks imported inside the `{$SITE_DOMAIN}` site definition. Each project writes one snippet (e.g. `ibkr.caddy`, `kraken.caddy`). Routes must be prefixed with the project name (`/ibkr/*`, `/kraken/*`) to avoid collisions.
+- **`sites/*.caddy`** contain `handle` blocks imported inside the `{$SITE_DOMAIN}` site definition. Each project writes one snippet (e.g. `ibkr.caddy`, `kraken.caddy`). Routes must be prefixed with the project name (`/ibkr/*`, `/kraken/*`) to avoid collisions. The `debug.caddy` snippet routes `/debug/webhook/*` to the `ibkr-debug` container.
 - **`domains/*.caddy`** contain full site definitions (e.g. `{$VNC_DOMAIN} { ... }`), imported at the top level.
 - This structure allows multiple projects to share a single Caddy instance on the same droplet.
 
@@ -313,6 +316,27 @@ services/notifier/
 - **`validate_notifier_env()`** is called by `cli/__init__.py` during pre-deploy checks to ensure all required env vars are set for the configured backends.
 - **Adding a new backend** — create `services/notifier/<name>.py` with a class extending `BaseNotifier`, add it to `REGISTRY` in `__init__.py`.
 - **The poller calls `notify(notifiers, payload)`** — notifiers are loaded once at startup and passed through to `poll_once()`. The poller has no direct knowledge of webhook delivery mechanics.
+- **Debug webhook URL resolution** — `WebhookNotifier.__init__` calls `_resolve_webhook_url(suffix)`, a pure function in `webhook.py`. If `DEBUG_WEBHOOK_PATH` is set, the URL is overridden to `http://ibkr-debug:9000/debug/webhook/{path}` (container-to-container DNS). Otherwise, it reads `TARGET_WEBHOOK_URL{suffix}`. The service name (`ibkr-debug`) and port (`9000`) are hardcoded constants in `webhook.py`. No env var mutation occurs — the resolved URL is stored in `self._url`.
+
+## Debug Webhook Service
+
+The `services/debug/` service is a **standalone aiohttp container** that captures webhook payloads for inspection during development and debugging.
+
+```
+services/debug/
+  debug_app.py             # aiohttp app: POST/GET/DELETE /debug/webhook/{path} + GET /health
+  Dockerfile               # python:3.11-slim, runs debug_app.py
+  requirements.txt         # aiohttp only
+  test_debug.py            # Unit tests (10 tests)
+```
+
+- **`DEBUG_WEBHOOK_PATH`** env var controls the accepted path segment. Requests to any other path return 404. When unset, the container is not running (`DEBUG_REPLICAS=0`).
+- **In-memory inbox** — `_inbox: list[PayloadEntry]` stores received payloads (payload + headers + timestamp). Capped at `MAX_DEBUG_WEBHOOK_PAYLOADS` (default 100, hard max 150) with FIFO eviction.
+- **Endpoints**: `POST /debug/webhook/{path}` captures a payload, `GET` returns all stored payloads, `DELETE` clears the inbox. `GET /health` returns status.
+- **Logging**: Summary at INFO level, full payload+headers at DEBUG level. Set `DEBUG_LOG_LEVEL=DEBUG` in `.env` and `docker logs -f ibkr-debug` to tail payloads. Aggressive log rotation (`max-size: 10k`, `max-file: 1`) keeps disk usage minimal.
+- **No auth** — the debug path in the URL acts as a shared secret. The service is not exposed to the internet unless Caddy routes to it via `debug.caddy`.
+- **Port 9000** is hardcoded (`HTTP_PORT = 9000`). In production, Caddy reverse-proxies to `ibkr-debug:9000` — no host port mapping needed. Local dev uses `15003:9000` (`docker-compose.local.yml`), E2E uses `15012:9000` (`docker-compose.test.yml`).
+- **Module name**: `debug_app.py` (not `main.py`) to avoid `sys.modules` collisions with `services/poller/main.py` and `services/remote-client/main.py` when all three are on `sys.path`.
 
 ## Dedup Structure
 
@@ -519,7 +543,7 @@ python3 -m cli poll 2
 
 ```
 .env.example            # Template — copy to .env and fill in real values
-docker-compose.yml      # All 6 services
+docker-compose.yml      # All 7 services
 docker-compose.shared.yml # Shared-mode overlay (disables Caddy, uses relay-net)
 docker-compose.local.yml  # Local dev override (direct port access, no TLS)
 cli/                    # Python CLI (operator scripts)
@@ -536,12 +560,14 @@ services/               # Business-logic services (user-facing features)
   remote-client/        # remote-client service (see Remote Client Structure above)
   poller/               # Flex poller service (see Poller Structure above)
     models_poller.py    # Pydantic models: Fill, Trade, WebhookPayloadTrades, WebhookPayload, BuySell, Source
+  debug/                # Debug webhook inbox service (see Debug Webhook Service below)
   notifier/             # Pluggable notification backends (library, no container)
   dedup/                # Shared SQLite dedup library (library, no container)
 infra/                  # Infrastructure backbone (no business logic)
   caddy/Caddyfile       # Reverse proxy config (uses env vars for domains)
   caddy/sites/          # Route snippets imported inside {$SITE_DOMAIN}
     ibkr.caddy          # /ibkr/* routes (poller, remote-client)
+    debug.caddy          # /debug/webhook/* → ibkr-debug:9000
   caddy/domains/        # Full site blocks imported at top level
     ibkr-vnc.caddy      # {$VNC_DOMAIN} block (novnc + gateway-controller)
   gateway-controller/   # CGI sidecar (Alpine, busybox httpd)

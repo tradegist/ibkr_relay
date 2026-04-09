@@ -32,6 +32,7 @@ But even with those libraries, you still need to **build a Python app, deploy it
 - [Gateway Management](#gateway-management)
 - [Placing Orders](#placing-orders)
 - [Webhook Payload](#webhook-payload)
+  - [Debug Webhook Inbox](#debug-webhook-inbox)
 - [Flex Web Service Setup](#flex-web-service-setup)
 - [On-Demand Poll](#on-demand-poll)
 - [Commands](#commands)
@@ -311,29 +312,32 @@ Types are auto-generated from the Pydantic models via `make types`. The `Trade` 
 
 All configuration is via environment variables in `.env`:
 
-| Variable                       | Required | Default            | Description                                                                                           |
-| ------------------------------ | -------- | ------------------ | ----------------------------------------------------------------------------------------------------- |
-| `DO_API_TOKEN`                 | Yes      | —                  | DigitalOcean API token                                                                                |
-| `TWS_USERID`                   | Yes      | —                  | IBKR account username                                                                                 |
-| `TWS_PASSWORD`                 | Yes      | —                  | IBKR account password                                                                                 |
-| `TRADING_MODE`                 | No       | `paper`            | `paper` or `live`                                                                                     |
-| `VNC_SERVER_PASSWORD`          | Yes      | —                  | Password for noVNC browser access                                                                     |
-| `VNC_DOMAIN`                   | Yes      | —                  | Domain for VNC access (see [Domains & HTTPS](#domains--https))                                        |
-| `SITE_DOMAIN`                  | Yes      | —                  | Domain for trade API (see [Domains & HTTPS](#domains--https))                                         |
-| `API_TOKEN`                    | Yes      | —                  | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)                                         |
-| `IBKR_FLEX_TOKEN`              | Yes      | —                  | Flex Web Service token (from Client Portal)                                                           |
-| `IBKR_FLEX_QUERY_ID`           | Yes      | —                  | Flex Query ID (Trade Confirmation or Activity)                                                        |
-| `TARGET_WEBHOOK_URL`           | No       | —                  | Webhook endpoint (empty = log-only dry-run)                                                           |
-| `WEBHOOK_SECRET`               | No       | —                  | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                  |
-| `NOTIFIERS`                    | No       | —                  | Active notification backends (e.g. `webhook`). Empty = dry-run                                        |
-| `POLLER_ENABLED`               | No       | `true`             | Set to `false` to disable the poller container entirely                                               |
-| `REMOTE_CLIENT_ENABLED`        | No       | `true`             | Set to `false` to disable ib-gateway, novnc, remote-client, and gateway-controller (poller-only mode) |
-| `DROPLET_SIZE`                 | No       | —                  | Override droplet size slug (e.g. `s-1vcpu-512mb`). Ignores `JAVA_HEAP_SIZE` when set                  |
-| `POLL_INTERVAL_SECONDS`        | No       | `600`              | Flex poll interval (seconds)                                                                          |
-| `LISTENER_ENABLED`             | No       | —                  | Set to any non-empty value to enable real-time trade event listener                                   |
-| `LISTENER_EXEC_EVENTS_ENABLED` | No       | —                  | Enable `execDetailsEvent` webhooks (preliminary fill, no commission). Default: disabled               |
-| `LISTENER_EVENT_DEBOUNCE_TIME` | No       | `0`                | Debounce window in ms for `commissionReportEvent` fills. `0` = immediate dispatch                     |
-| `TIME_ZONE`                    | No       | `America/New_York` | Timezone (tz database format)                                                                         |
+| Variable                       | Required | Default            | Description                                                                                                     |
+| ------------------------------ | -------- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `DO_API_TOKEN`                 | Yes      | —                  | DigitalOcean API token                                                                                          |
+| `TWS_USERID`                   | Yes      | —                  | IBKR account username                                                                                           |
+| `TWS_PASSWORD`                 | Yes      | —                  | IBKR account password                                                                                           |
+| `TRADING_MODE`                 | No       | `paper`            | `paper` or `live`                                                                                               |
+| `VNC_SERVER_PASSWORD`          | Yes      | —                  | Password for noVNC browser access                                                                               |
+| `VNC_DOMAIN`                   | Yes      | —                  | Domain for VNC access (see [Domains & HTTPS](#domains--https))                                                  |
+| `SITE_DOMAIN`                  | Yes      | —                  | Domain for trade API (see [Domains & HTTPS](#domains--https))                                                   |
+| `API_TOKEN`                    | Yes      | —                  | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)                                                   |
+| `IBKR_FLEX_TOKEN`              | Yes      | —                  | Flex Web Service token (from Client Portal)                                                                     |
+| `IBKR_FLEX_QUERY_ID`           | Yes      | —                  | Flex Query ID (Trade Confirmation or Activity)                                                                  |
+| `TARGET_WEBHOOK_URL`           | No       | —                  | Webhook endpoint (empty = log-only dry-run)                                                                     |
+| `WEBHOOK_SECRET`               | No       | —                  | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                            |
+| `NOTIFIERS`                    | No       | —                  | Active notification backends (e.g. `webhook`). Empty = dry-run                                                  |
+| `POLLER_ENABLED`               | No       | `true`             | Set to `false` to disable the poller container entirely                                                         |
+| `REMOTE_CLIENT_ENABLED`        | No       | `true`             | Set to `false` to disable ib-gateway, novnc, remote-client, and gateway-controller (poller-only mode)           |
+| `DROPLET_SIZE`                 | No       | —                  | Override droplet size slug (e.g. `s-1vcpu-512mb`). Ignores `JAVA_HEAP_SIZE` when set                            |
+| `POLL_INTERVAL_SECONDS`        | No       | `600`              | Flex poll interval (seconds)                                                                                    |
+| `LISTENER_ENABLED`             | No       | —                  | Set to any non-empty value to enable real-time trade event listener                                             |
+| `LISTENER_EXEC_EVENTS_ENABLED` | No       | —                  | Enable `execDetailsEvent` webhooks (preliminary fill, no commission). Default: disabled                         |
+| `LISTENER_EVENT_DEBOUNCE_TIME` | No       | `0`                | Debounce window in ms for `commissionReportEvent` fills. `0` = immediate dispatch                               |
+| `DEBUG_WEBHOOK_PATH`           | No       | —                  | Route webhooks to debug inbox instead of `TARGET_WEBHOOK_URL` (see [Debug Webhook Inbox](#debug-webhook-inbox)) |
+| `MAX_DEBUG_WEBHOOK_PAYLOADS`   | No       | `100`              | Max payloads stored in the debug inbox (hard max: 150, FIFO eviction)                                           |
+| `DEBUG_LOG_LEVEL`              | No       | `INFO`             | Set to `DEBUG` to include full payload+headers in `docker logs ibkr-debug`                                      |
+| `TIME_ZONE`                    | No       | `America/New_York` | Timezone (tz database format)                                                                                   |
 
 ## Webhook Payload
 
@@ -384,22 +388,22 @@ The envelope uses a discriminated union pattern — `relay` identifies the excha
 
 All exchange relays (IBKR, Kraken, etc.) use the same **CommonFill** model. The `data` array contains `Trade` objects with these guaranteed fields:
 
-| Field       | Type                | Description                                                                               |
-| ----------- | ------------------- | ----------------------------------------------------------------------------------------- |
-| `orderId`   | `string`            | Permanent order identifier (unique per account)                                           |
-| `symbol`    | `string`            | Instrument symbol                                                                         |
-| `assetClass`| `AssetClass`        | `"equity"`, `"option"`, `"crypto"`, `"future"`, `"forex"`, or `"other"`                  |
-| `side`      | `"buy" \| "sell"`   | Trade direction (lowercase)                                                               |
-| `orderType` | `OrderType \| null` | Normalized: `"market"`, `"limit"`, `"stop"`, `"stop_limit"`, `"trailing_stop"`, or `null` |
-| `price`     | `number`            | VWAP when aggregated, single fill price otherwise                                         |
-| `volume`    | `number`            | Sum of fill quantities                                                                    |
-| `cost`      | `number`            | Total cost (sum of fills)                                                                 |
-| `fee`       | `number`            | Total fees/commissions (sum of fills)                                                     |
-| `fillCount` | `number`            | Number of fills aggregated into this trade                                                |
-| `execIds`   | `string[]`          | One execution ID per fill (for tracing back to individual fills)                          |
-| `timestamp` | `string`            | Latest fill timestamp                                                                     |
-| `source`    | `string`            | Origin: `"flex"`, `"execDetailsEvent"`, or `"commissionReportEvent"`                      |
-| `raw`       | `object`            | Original exchange-specific payload (all fields, unmodified)                               |
+| Field        | Type                | Description                                                                               |
+| ------------ | ------------------- | ----------------------------------------------------------------------------------------- |
+| `orderId`    | `string`            | Permanent order identifier (unique per account)                                           |
+| `symbol`     | `string`            | Instrument symbol                                                                         |
+| `assetClass` | `AssetClass`        | `"equity"`, `"option"`, `"crypto"`, `"future"`, `"forex"`, or `"other"`                   |
+| `side`       | `"buy" \| "sell"`   | Trade direction (lowercase)                                                               |
+| `orderType`  | `OrderType \| null` | Normalized: `"market"`, `"limit"`, `"stop"`, `"stop_limit"`, `"trailing_stop"`, or `null` |
+| `price`      | `number`            | VWAP when aggregated, single fill price otherwise                                         |
+| `volume`     | `number`            | Sum of fill quantities                                                                    |
+| `cost`       | `number`            | Total cost (sum of fills)                                                                 |
+| `fee`        | `number`            | Total fees/commissions (sum of fills)                                                     |
+| `fillCount`  | `number`            | Number of fills aggregated into this trade                                                |
+| `execIds`    | `string[]`          | One execution ID per fill (for tracing back to individual fills)                          |
+| `timestamp`  | `string`            | Latest fill timestamp                                                                     |
+| `source`     | `string`            | Origin: `"flex"`, `"execDetailsEvent"`, or `"commissionReportEvent"`                      |
+| `raw`        | `object`            | Original exchange-specific payload (all fields, unmodified)                               |
 
 The `raw` object preserves the full exchange-specific data. For IBKR Flex, this includes ~100 XML attributes (account info, security details, financial fields, dates). For ib_async listener events, it includes a smaller set of fields from the execution/commission report objects. Consumers should treat `raw` as opaque exchange data — the CommonFill fields above are the stable contract.
 
@@ -424,6 +428,39 @@ assert(headerValue === `sha256=${expected}`);
 ```
 
 If `TARGET_WEBHOOK_URL` is empty, the relay logs the payload to stdout (dry-run mode) instead of sending it.
+
+### Debug Webhook Inbox
+
+To test webhook delivery without hitting production services (e.g. Pipedream), set `DEBUG_WEBHOOK_PATH` in `.env`:
+
+```env
+DEBUG_WEBHOOK_PATH=abcdef
+#MAX_DEBUG_WEBHOOK_PAYLOADS=100
+#DEBUG_LOG_LEVEL=INFO
+```
+
+This starts the `ibkr-debug` container and reroutes all webhook delivery (from both the poller and listener) to an in-memory inbox at `/debug/webhook/<path>`. The real `TARGET_WEBHOOK_URL` is ignored while this is set.
+
+**Inspect captured payloads:**
+
+```bash
+# View all stored payloads
+curl -s https://trade.example.com/debug/webhook/abcdef | python3 -m json.tool
+
+# Clear the inbox
+curl -s -X DELETE https://trade.example.com/debug/webhook/abcdef
+```
+
+**Stream payloads in real time** — set `DEBUG_LOG_LEVEL=DEBUG` and tail the container logs:
+
+```bash
+make logs S=ibkr-debug
+# or: docker logs -f ibkr-debug
+```
+
+Payloads are logged at DEBUG level (full payload + headers). At INFO level (default), only a count summary is logged. Log rotation is aggressive (`max-size: 10k`) so sensitive data does not accumulate on disk.
+
+To disable, remove or comment out `DEBUG_WEBHOOK_PATH` and run `make sync`. The container stops automatically (`DEBUG_REPLICAS=0`).
 
 ## Commands
 
