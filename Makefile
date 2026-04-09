@@ -34,6 +34,7 @@ setup: ## Create .venv and install all dependencies
 	.venv/bin/pip install -r requirements-dev.txt -r services/poller/requirements.txt -r services/remote-client/requirements.txt
 	@echo "$(CURDIR)/services/poller" > $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 	@echo "$(CURDIR)/services/remote-client" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
+	@echo "$(CURDIR)/services/debug" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 	@echo "$(CURDIR)/services" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 
 deploy: ## Deploy infrastructure (Terraform + Docker)
@@ -78,7 +79,7 @@ types: ## Regenerate TypeScript types from Pydantic models
 	@echo "Generated types/shared/types.d.ts + types/poller/types.d.ts + types/http/types.d.ts"
 
 test: ## Run unit tests
-	PYTHONPATH=.:services/poller:services/remote-client:services $(PYTHON) -m pytest -v
+	PYTHONPATH=.:services/poller:services/remote-client:services:services/debug $(PYTHON) -m pytest -v
 
 typecheck: ## Run mypy strict type checking
 	MYPYPATH=services/poller:services $(PYTHON) -m mypy services/poller/ cli/test_webhook.py
@@ -86,10 +87,11 @@ typecheck: ## Run mypy strict type checking
 	MYPYPATH=services $(PYTHON) -m mypy services/notifier/
 	MYPYPATH=services $(PYTHON) -m mypy services/dedup/
 	MYPYPATH=services $(PYTHON) -m mypy services/shared/
+	$(PYTHON) -m mypy services/debug/debug_app.py
 	$(PYTHON) -m mypy schema_gen.py
 
 lint: ## Run ruff linter (use FIX=1 to auto-fix)
-	$(PYTHON) -m ruff check services/poller/ services/remote-client/ services/notifier/ services/dedup/ services/shared/ cli/ schema_gen.py $(if $(FIX),--fix)
+	$(PYTHON) -m ruff check services/poller/ services/remote-client/ services/notifier/ services/dedup/ services/shared/ services/debug/ cli/ schema_gen.py $(if $(FIX),--fix)
 
 local-up: ## Start full stack locally (no TLS, direct port access)
 	@if [ -f .env ]; then \
@@ -169,7 +171,7 @@ e2e-down: ## Stop and remove E2E test stack
 	$(E2E_COMPOSE) down
 
 e2e-run: ## Run E2E tests (stack must be up)
-	@$(E2E_COMPOSE) restart remote-client poller > /dev/null 2>&1 && sleep 3
+	@$(E2E_COMPOSE) restart remote-client poller ibkr-debug > /dev/null 2>&1 && sleep 3
 	$(PYTHON) -m pytest services/remote-client/tests/e2e/ services/poller/tests/e2e/ -v
 
 e2e: ## Run E2E tests against local paper account (starts/stops stack)

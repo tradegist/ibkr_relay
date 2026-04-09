@@ -12,6 +12,27 @@ from .base import BaseNotifier
 
 log = logging.getLogger("notifier.webhook")
 
+_DEBUG_SERVICE_NAME = "ibkr-debug"
+_DEBUG_SERVICE_PORT = 9000
+
+
+def _resolve_webhook_url(suffix: str) -> str:
+    """Return the webhook target URL, preferring debug inbox when configured.
+
+    Checks DEBUG_WEBHOOK_PATH first. If set, constructs the container-to-container
+    URL for the debug service. Otherwise falls back to TARGET_WEBHOOK_URL{suffix}.
+    Result is computed once per WebhookNotifier instance (cached in self._url).
+    """
+    debug_path = os.environ.get("DEBUG_WEBHOOK_PATH", "").strip()
+    if debug_path:
+        url = f"http://{_DEBUG_SERVICE_NAME}:{_DEBUG_SERVICE_PORT}/debug/webhook/{debug_path}"
+        log.info(
+            "DEBUG_WEBHOOK_PATH set — using debug inbox: %s",
+            url,
+        )
+        return url
+    return os.environ.get(f"TARGET_WEBHOOK_URL{suffix}", "")
+
 
 class WebhookNotifier(BaseNotifier):
     """Send JSON payloads to a webhook URL with HMAC-SHA256 signature."""
@@ -19,7 +40,7 @@ class WebhookNotifier(BaseNotifier):
     name = "webhook"
 
     def __init__(self, suffix: str = "") -> None:
-        self._url = os.environ.get(f"TARGET_WEBHOOK_URL{suffix}", "")
+        self._url = _resolve_webhook_url(suffix)
         self._secret = os.environ.get(f"WEBHOOK_SECRET{suffix}", "")
         self._header_name = os.environ.get(f"WEBHOOK_HEADER_NAME{suffix}", "")
         self._header_value = os.environ.get(f"WEBHOOK_HEADER_VALUE{suffix}", "")

@@ -97,3 +97,30 @@ class TestWebhookNotifier:
     def test_required_env_vars(self) -> None:
         assert "TARGET_WEBHOOK_URL" in WebhookNotifier.required_env_vars()
         assert "WEBHOOK_SECRET" in WebhookNotifier.required_env_vars()
+
+
+class TestResolveWebhookUrl:
+    def test_debug_path_overrides_target_url(self) -> None:
+        env = {"DEBUG_WEBHOOK_PATH": "abc123", "TARGET_WEBHOOK_URL": "https://original.com"}
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier()
+        assert notifier._url == "http://ibkr-debug:9000/debug/webhook/abc123"
+
+    def test_no_debug_path_uses_target_url(self) -> None:
+        env = {"TARGET_WEBHOOK_URL": "https://original.com/hook", "WEBHOOK_SECRET": "s"}
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier()
+        assert notifier._url == "https://original.com/hook"
+
+    def test_blank_debug_path_uses_target_url(self) -> None:
+        env = {"DEBUG_WEBHOOK_PATH": "  ", "TARGET_WEBHOOK_URL": "https://keep.com"}
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier()
+        assert notifier._url == "https://keep.com"
+
+    def test_debug_path_ignores_suffix(self) -> None:
+        """DEBUG_WEBHOOK_PATH has no suffix — all instances share the same debug inbox."""
+        env = {"DEBUG_WEBHOOK_PATH": "xyz", "TARGET_WEBHOOK_URL_2": "https://other.com"}
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier(suffix="_2")
+        assert notifier._url == "http://ibkr-debug:9000/debug/webhook/xyz"

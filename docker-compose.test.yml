@@ -14,13 +14,11 @@ services:
       LISTENER_EXEC_EVENTS_ENABLED: "true"
       LISTENER_EVENT_DEBOUNCE_TIME: "2000"
       NOTIFIERS: webhook
-      TARGET_WEBHOOK_URL: http://host.docker.internal:19999/webhook
       WEBHOOK_SECRET: test-webhook-secret
+      DEBUG_WEBHOOK_PATH: test-debug-path
       PYTHONPATH: /opt:/opt/poller-models
     ports:
       - "15010:5000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ./services/remote-client:/app
       - ./services/notifier:/opt/notifier
@@ -47,6 +45,7 @@ services:
       IBKR_FLEX_QUERY_ID: "000000"
       API_TOKEN: test-token
       POLLER_API_PORT: "8000"
+      DEBUG_WEBHOOK_PATH: test-debug-path
       PYTHONPATH: /opt
     ports:
       - "15011:8000"
@@ -67,6 +66,27 @@ services:
       timeout: 5s
       retries: 20
       start_period: 5s
+
+  ibkr-debug:
+    restart: "no"
+    environment:
+      DEBUG_WEBHOOK_PATH: test-debug-path
+    ports:
+      - "15012:9000"
+    volumes:
+      - ./services/debug:/app
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+      start_period: 3s
 
   # Disable production-only services
   novnc:

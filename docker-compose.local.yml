@@ -15,5 +15,9 @@ services:
     ports:
       - "15001:8000"
 
+  ibkr-debug:
+    ports:
+      - "15003:9000"
+
   caddy:
     profiles: ["disabled"]

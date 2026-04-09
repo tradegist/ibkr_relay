@@ -83,6 +83,7 @@ services:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       WEBHOOK_HEADER_NAME: ${WEBHOOK_HEADER_NAME:-}
       WEBHOOK_HEADER_VALUE: ${WEBHOOK_HEADER_VALUE:-}
+      DEBUG_WEBHOOK_PATH: ${DEBUG_WEBHOOK_PATH:-}
       DEDUP_DB_PATH: /data/dedup/fills.db
     expose:
       - "5000"
@@ -104,6 +105,7 @@ services:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       WEBHOOK_HEADER_NAME: ${WEBHOOK_HEADER_NAME:-}
       WEBHOOK_HEADER_VALUE: ${WEBHOOK_HEADER_VALUE:-}
+      DEBUG_WEBHOOK_PATH: ${DEBUG_WEBHOOK_PATH:-}
       POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-600}
       API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
       DEDUP_DB_PATH: /data/dedup/fills.db
@@ -130,6 +132,7 @@ services:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET_2:-}
       WEBHOOK_HEADER_NAME: ${WEBHOOK_HEADER_NAME_2:-}
       WEBHOOK_HEADER_VALUE: ${WEBHOOK_HEADER_VALUE_2:-}
+      DEBUG_WEBHOOK_PATH: ${DEBUG_WEBHOOK_PATH:-}
       POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS_2:-600}
       API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
       DEDUP_DB_PATH: /data/dedup/fills.db
@@ -149,6 +152,24 @@ services:
       COMPOSE_PROJECT_NAME: ibkr-relay
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "9000"
+
+  ibkr-debug:
+    build:
+      context: .
+      dockerfile: services/debug/Dockerfile
+    restart: always
+    deploy:
+      replicas: ${DEBUG_REPLICAS:-0}
+    logging:
+      options:
+        max-size: "10k"
+        max-file: "1"
+    environment:
+      DEBUG_WEBHOOK_PATH: ${DEBUG_WEBHOOK_PATH:-}
+      MAX_DEBUG_WEBHOOK_PAYLOADS: ${MAX_DEBUG_WEBHOOK_PAYLOADS:-100}
+      LOG_LEVEL: ${DEBUG_LOG_LEVEL:-INFO}
     expose:
       - "9000"
 
