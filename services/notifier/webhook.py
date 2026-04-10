@@ -49,12 +49,11 @@ def _resolve_webhook_url(suffix: str) -> str:
     """
     debug_path = get_debug_webhook_path()
     if debug_path:
-        url = f"http://{_DEBUG_SERVICE_NAME}:{_DEBUG_SERVICE_PORT}/debug/webhook/{debug_path}"
-        log.info(
-            "DEBUG_WEBHOOK_PATH set — using debug inbox: %s",
-            url,
+        log.info("DEBUG_WEBHOOK_PATH set — using debug inbox")
+        return (
+            f"http://{_DEBUG_SERVICE_NAME}:{_DEBUG_SERVICE_PORT}/debug/webhook/"
+            f"{debug_path}"
         )
-        return url
     return _get_target_webhook_url(suffix)
 
 

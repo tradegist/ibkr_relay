@@ -46,11 +46,12 @@ def load_notifiers(suffix: str = "") -> list[BaseNotifier]:
     for name in names:
         cls = REGISTRY.get(name)
         if cls is None:
-            log.error(
-                "Unknown notifier %r in NOTIFIERS%s. Available: %s",
-                name, suffix, ", ".join(REGISTRY),
+            msg = (
+                f"Unknown notifier {name!r} in NOTIFIERS{suffix}. "
+                f"Available: {', '.join(REGISTRY)}"
             )
-            raise SystemExit(1)
+            log.error("%s", msg)
+            raise SystemExit(msg)
 
         notifiers.append(cls(suffix=suffix))
         log.info("Loaded notifier: %s%s", name, suffix or "")

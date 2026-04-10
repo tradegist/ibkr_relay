@@ -31,11 +31,18 @@ def _get_debug_webhook_path() -> str:
 def _get_max_payloads() -> int:
     raw = os.environ.get("MAX_DEBUG_WEBHOOK_PAYLOADS", "100").strip()
     try:
-        return min(int(raw), 150)
+        value = int(raw)
     except ValueError:
         raise SystemExit(
             f"Invalid MAX_DEBUG_WEBHOOK_PAYLOADS={raw!r} — must be an integer"
         ) from None
+
+    if value < 0:
+        raise SystemExit(
+            f"Invalid MAX_DEBUG_WEBHOOK_PAYLOADS={raw!r} — must be >= 0"
+        )
+
+    return min(value, 150)
 
 
 def _path_matches(request: web.Request) -> bool:
