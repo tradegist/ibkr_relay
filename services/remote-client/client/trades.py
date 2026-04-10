@@ -8,7 +8,7 @@ from ib_async import IB
 from ib_async import Trade as IBTrade
 from ib_async.objects import Fill as IBFill
 
-from models_remote_client import (
+from rc_models import (
     FillDetail,
     ListTradesResponse,
     SecType,

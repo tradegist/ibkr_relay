@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dedup import get_processed_ids, mark_processed_batch
-from models_poller import BuySell, Fill, Trade, WebhookPayloadTrades
 from poller import (
     get_last_poll_ts,
     init_dedup_db,
@@ -16,6 +15,7 @@ from poller import (
     prune_old,
     set_last_poll_ts,
 )
+from poller_models import BuySell, Fill, Trade, WebhookPayloadTrades
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -92,8 +92,7 @@ def _make_trade(**overrides: Any) -> Trade:
 
 class TestInitDb:
     def test_dedup_creates_table(self) -> None:
-        with patch("poller.DEDUP_DB_PATH", ":memory:"):
-            db = init_dedup_db()
+        db = init_dedup_db(db_path=":memory:")
         tables = {
             r[0] for r in db.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
@@ -102,9 +101,8 @@ class TestInitDb:
         assert "processed_fills" in tables
         db.close()
 
-    def test_meta_creates_table(self) -> None:
-        with patch("poller.META_DB_PATH", ":memory:"):
-            db = init_meta_db()
+    def test_meta_creates_table(self, tmp_path: Any) -> None:
+        db = init_meta_db(db_path=str(tmp_path / "meta.db"))
         tables = {
             r[0] for r in db.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"

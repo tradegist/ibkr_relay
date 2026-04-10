@@ -2,8 +2,8 @@
 
 import pytest
 
-from models_poller import BuySell, Fill, Trade
 from poller.flex_parser import parse_fills
+from poller_models import BuySell, Fill, Trade
 from shared import aggregate_fills
 
 # ── Helpers ──────────────────────────────────────────────────────────────

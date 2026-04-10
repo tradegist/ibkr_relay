@@ -5,8 +5,8 @@ import logging
 
 from aiohttp import web
 
-from models_poller import RunPollResponse
 from poller import poll_once
+from poller_models import RunPollResponse
 
 log = logging.getLogger("poller")
 

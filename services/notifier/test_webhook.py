@@ -4,6 +4,7 @@ import hashlib
 import hmac as hmac_mod
 from unittest.mock import MagicMock, patch
 
+import pytest
 from pydantic import BaseModel
 
 from notifier.webhook import WebhookNotifier
@@ -17,8 +18,11 @@ class _SamplePayload(BaseModel):
 class TestWebhookNotifier:
     def test_dry_run_no_url(self) -> None:
         """No URL → logs payload, no HTTP call."""
-        with patch.dict("os.environ", {}, clear=True):
+        env = {"DEBUG_WEBHOOK_PATH": "test", "WEBHOOK_SECRET": "s"}
+        with patch.dict("os.environ", env, clear=True):
             notifier = WebhookNotifier()
+        # Force empty URL to exercise dry-run path
+        notifier._url = ""
         notifier.send(_SamplePayload(symbol="AAPL", quantity=1))
 
     @patch("notifier.webhook.httpx.post")
@@ -97,3 +101,59 @@ class TestWebhookNotifier:
     def test_required_env_vars(self) -> None:
         assert "TARGET_WEBHOOK_URL" in WebhookNotifier.required_env_vars()
         assert "WEBHOOK_SECRET" in WebhookNotifier.required_env_vars()
+
+
+class TestResolveWebhookUrl:
+    def test_debug_path_overrides_target_url(self) -> None:
+        env = {"DEBUG_WEBHOOK_PATH": "abc123", "TARGET_WEBHOOK_URL": "https://original.com", "WEBHOOK_SECRET": "s"}
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier()
+        assert notifier._url == "http://ibkr-debug:9000/debug/webhook/abc123"
+
+    def test_no_debug_path_uses_target_url(self) -> None:
+        env = {"TARGET_WEBHOOK_URL": "https://original.com/hook", "WEBHOOK_SECRET": "s"}
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier()
+        assert notifier._url == "https://original.com/hook"
+
+    def test_blank_debug_path_uses_target_url(self) -> None:
+        env = {"DEBUG_WEBHOOK_PATH": "  ", "TARGET_WEBHOOK_URL": "https://keep.com", "WEBHOOK_SECRET": "s"}
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier()
+        assert notifier._url == "https://keep.com"
+
+
+class TestValidation:
+    def test_missing_required_vars_exits(self) -> None:
+        """Constructor raises SystemExit when required env vars are missing."""
+        with patch.dict("os.environ", {}, clear=True), \
+             pytest.raises(SystemExit):
+            WebhookNotifier()
+
+    def test_missing_secret_exits(self) -> None:
+        """WEBHOOK_SECRET is required even when DEBUG_WEBHOOK_PATH is set."""
+        env = {"DEBUG_WEBHOOK_PATH": "abc123"}
+        with patch.dict("os.environ", env, clear=True), \
+             pytest.raises(SystemExit):
+            WebhookNotifier()
+
+    def test_debug_path_skips_target_url_validation(self) -> None:
+        """TARGET_WEBHOOK_URL is not required when DEBUG_WEBHOOK_PATH is set."""
+        env = {"DEBUG_WEBHOOK_PATH": "abc123", "WEBHOOK_SECRET": "s"}
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier()
+        assert "ibkr-debug" in notifier._url
+
+    def test_missing_target_url_without_debug_exits(self) -> None:
+        """TARGET_WEBHOOK_URL is required when DEBUG_WEBHOOK_PATH is not set."""
+        env = {"WEBHOOK_SECRET": "s"}
+        with patch.dict("os.environ", env, clear=True), \
+             pytest.raises(SystemExit):
+            WebhookNotifier()
+
+    def test_debug_path_ignores_suffix(self) -> None:
+        """DEBUG_WEBHOOK_PATH has no suffix — all instances share the same debug inbox."""
+        env = {"DEBUG_WEBHOOK_PATH": "xyz", "TARGET_WEBHOOK_URL_2": "https://other.com", "WEBHOOK_SECRET_2": "s"}
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier(suffix="_2")
+        assert notifier._url == "http://ibkr-debug:9000/debug/webhook/xyz"

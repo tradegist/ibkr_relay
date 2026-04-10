@@ -10,6 +10,9 @@
 - **Update README.md when changing public interfaces.** When adding or modifying CLI commands, Makefile targets, API endpoints, or env vars, always update the README to reflect the change.
 - **Run `make lint` after every code change.** Ruff enforces unused imports (F401), import ordering (I001), unused variables, common pitfalls (bugbear), and modern Python idioms. If ruff fails, fix before committing. Use `make lint FIX=1` to auto-fix safe issues (import sorting, etc.).
 - **Register new modules in `pyproject.toml`.** When adding a new Python service, package, or standalone module under `services/`, immediately add it to all four places in `pyproject.toml`: (1) `tool.pytest.ini_options.testpaths`, (2) `tool.ruff.src`, (3) `tool.ruff.lint.isort.known-first-party`, and (4) the mypy invocation in the Makefile. Missing any of these causes silent miscategorisation (isort), missed tests (pytest), or unchecked code (mypy).
+- **Centralise env var reads into typed getter functions.** Each env var must be read in exactly one place — a getter function in the module that owns it (e.g. `get_flex_token()` in `poller/__init__.py`). The getter applies `.strip()` and any type conversion (`int()`, boolean parsing). All other code — including other modules, `main.py` entrypoints, and route handlers — imports and calls the getter. Never call `os.environ.get()` inline except inside a getter. This eliminates duplicated reads, inconsistent `.strip()`, and scattered default values. When the same env var is read by two separate services running in different containers (e.g. `DEDUP_DB_PATH` in both poller and remote-client), each service has its own getter — cross-service imports don't exist at runtime.
+- **Getters must validate and fail fast.** Every getter that reads an env var must validate the value and raise `SystemExit` with a descriptive message on invalid input — never let a bad value propagate silently. For required string vars (no default), check emptiness: `if not val: raise SystemExit("IBKR_FLEX_TOKEN must be set")`. For `int()` conversions, wrap in `try/except ValueError: raise SystemExit(f"Invalid VAR={raw!r} — must be an integer")`. For boolean flags, parse inside the getter (`flag not in ("0", "false", "no")`) and return `bool`. Callers should never need to validate a getter's return value — if the getter returns, the value is valid.
+- **Prefer pure functions over side-effect functions.** Never write an `apply_*()` / `set_*()` function that silently mutates system state (env vars, globals, module-level caches) as its primary purpose. Instead, compute and return the value — let the caller decide how to use it. For example, instead of `apply_debug_url_override()` that mutates `os.environ`, write a `resolve_url()` that returns the URL and let the consumer store it. If a side-effect function is truly unavoidable (e.g. one-time DB migration), add an inline comment at every call site explaining **what** is mutated and **why**: `# Mutates os.environ["X"] to enable Y`.
 
 ## Security Rules (MANDATORY)
 
@@ -35,7 +38,7 @@
   4. `make e2e-down` — tear down **only after all tests pass**. Never tear down between iterations.
 - When modifying any Python file (`.py`), always run `make test`, `make typecheck`, and `make lint` and confirm all pass before deploying.
 - **Every Python file must be covered by `make typecheck`.** When adding a new Python service, package, or standalone script, immediately add it to the mypy invocation in the Makefile. No Python file may exist outside mypy's scope.
-- After modifying any model in `services/poller/models_poller.py` or `services/remote-client/models_remote_client.py`, also run `make types` to regenerate the TypeScript definitions.
+- After modifying any model in `services/poller/poller_models.py` or `services/remote-client/rc_models.py`, also run `make types` to regenerate the TypeScript definitions.
 - **Always verify type safety by breaking it first.** After any refactor that touches types or model construction, deliberately introduce a type error (e.g. pass a `str` where `float` is expected), run `make typecheck`, and confirm it **fails**. Then revert and confirm it passes. Never assume mypy catches something — prove it.
 - **Avoid `dict[str, Any]` round-trips.** Never use `model_dump()` → `dict` → `Model(**data)` — mypy cannot type-check `**dict[str, Any]`. Use explicit keyword arguments or `model_copy(update=...)` instead.
 - **Prefer strict `Literal` types over bare `str` on Pydantic models.** Financial applications demand precision — a `str` field silently accepts typos and invalid values. When a field has a known set of valid values (e.g. `Action`, `OrderType`, `SecType`, `TimeInForce`), always use the existing `Literal` type. Only fall back to `str` when the external source (e.g. IB Gateway) genuinely returns unbounded values — and document why with an inline comment. At the mapping boundary (e.g. `_map_trade`), use `cast()` so mypy is satisfied and Pydantic validates at runtime.
@@ -56,7 +59,9 @@
 - **Isolate failures — one bad component must not take down the system.** When dispatching to multiple backends, plugins, or external services, wrap each call in `try/except Exception`, log the failure, and continue. A single broken notifier, webhook endpoint, or third-party API must not crash the poll cycle, block other notifiers, or kill the HTTP server.
 - **Never silently swallow errors.** Every `except` block must either log the exception (`log.exception(...)`) or re-raise. A bare `except: pass` is never acceptable — it hides bugs and makes debugging impossible.
 - **Use `log.exception()` for unexpected errors.** It automatically includes the traceback at `ERROR` level. Reserve `log.error()` for known/expected failure conditions where a traceback would be noise.
-- **Distinguish recoverable from fatal errors.** Recoverable errors (network timeout, temporary API failure) should be logged and retried or skipped. Fatal errors (missing required config, corrupted state) should fail fast with `raise SystemExit(1)` or `die()` and a clear message — do not attempt to limp along.
+- **Distinguish recoverable from fatal errors.** Recoverable errors (network timeout, temporary API failure) should be logged and retried or skipped. Fatal errors (missing required config, corrupted state) should fail fast with `raise SystemExit(msg)` or `die()` and a clear message — do not attempt to limp along.
+- **`SystemExit` must carry a descriptive message.** Never `raise SystemExit(1)` — callers that catch `SystemExit` (e.g. `validate_notifier_env()`) lose all context about what failed. Always `raise SystemExit("Notifier 'webhook' requires env vars: WEBHOOK_SECRET")` so the message can be surfaced to the user. Log the error at the raise site as well.
+- **Env var parsing must fail fast, not fall back silently.** When parsing an env var with `int()`, `float()`, or similar, wrap in `try/except ValueError` and `raise SystemExit(f"Invalid VAR={raw!r} — must be an integer")`. Never silently fall back to a default on parse failure — that hides config mistakes. Falling back is only appropriate for *missing* env vars (where the default is the intended behavior), not for *invalid* values.
 - **Validate at system boundaries, trust internally.** Validate all external inputs (API payloads, env vars, webhook data, IB Gateway responses) at the point of entry. Once validated, internal code should not re-validate — the type system and Pydantic models carry the guarantees.
 - **Never assume a default for financial enum fields.** When mapping external data to a constrained set (e.g. buy/sell side, order type), validate that the value is an exact match. Never use an `else` branch that silently assigns a default — e.g. `BuySell.BUY if x == "buy" else BuySell.SELL` treats _any_ non-buy value (including typos, nulls, and garbage) as SELL. Always check every valid value explicitly and raise/error on unknown input. This applies to all trade direction, order type, asset class, and similar mappings.
 - **`fee` is always positive (amount paid).** This is the industry standard (FIX protocol, Alpaca, Coinbase, Kraken). IBKR Flex XML reports commissions as negative numbers (`ibCommission="-0.62"`); the parser normalizes with `abs()` so `Fill.fee` and `Trade.fee` always represent the positive amount paid. Never store or forward negative fee values — consumers should not need to guess the sign convention.
@@ -89,20 +94,25 @@
 - **`.venv` is the project's virtual environment.** Created by `make setup` using Homebrew Python. All dev dependencies are installed there.
 - **Auto-activation** is configured in `~/.zshrc` via a `chpwd` hook — the venv activates automatically when `cd`'ing into the project directory.
 - **`make setup`** creates the `.venv` (if missing), installs all dependencies (`requirements-dev.txt` + both service requirements), and writes a `.pth` file (see below).
-- **`ibkr-relay.pth`** is created inside `.venv/lib/pythonX.Y/site-packages/` by `make setup`. It adds `services/poller/`, `services/remote-client/`, and `services/` to `sys.path` so that `from models_poller import ...`, `from models_remote_client import ...`, and `from notifier import ...` work everywhere (CLI, tests, scripts) without `sys.path` hacks or `PYTHONPATH`.
+- **`ibkr-relay.pth`** is created inside `.venv/lib/pythonX.Y/site-packages/` by `make setup`. It adds `services/poller/`, `services/remote-client/`, `services/debug/`, and `services/` to `sys.path` so that `from poller_models import ...`, `from rc_models import ...`, `from debug_app import ...`, and `from notifier import ...` work everywhere (CLI, tests, scripts) without `sys.path` hacks or `PYTHONPATH`.
 - **`.venv/` is gitignored** — never commit it.
+- **`docker-compose.local.yml` adds bind mounts** that shadow the `COPY`'d files in the image with your local source tree (`:ro`). This means code changes are visible on container restart — no rebuild needed. `make local-up` builds the images once; after that, `make sync` (when `DEFAULT_CLI_RELAY_ENV=local`) just restarts containers.
+- **`make sync` respects `DEFAULT_CLI_RELAY_ENV`.** When set to `local`, `make sync` restarts the local compose stack. When `prod` (default), it runs the full CLI sync to the droplet. Override per-command with `ENV=local` or `ENV=prod`.
+- **`make logs` also respects `DEFAULT_CLI_RELAY_ENV`.** `make logs S=ibkr-debug` streams local container logs when local, droplet logs when prod.
 
 ## Dependency Management
 
 - **Runtime deps (`services/poller/requirements.txt`, `services/remote-client/requirements.txt`)** use exact pins (`==`). These are deployed to production containers — builds must be reproducible.
 - **Dev deps (`requirements-dev.txt`)** use major-version constraints (`>=X,<X+1`). This allows minor/patch updates while preventing breaking changes.
 - **When adding a new dependency**, always pin it immediately — never leave it unpinned. Use exact pin for runtime, major-version constraint for dev.
+- **All services pinning the same dependency must use the same version.** When multiple `requirements.txt` files pin the same package (e.g. `aiohttp`), keep versions aligned. Check existing pins with `grep -r 'aiohttp==' services/*/requirements.txt` before adding a new one.
 
 ## Docker
 
 - **Never use `env_file:` in service definitions.** Always declare each env var explicitly in the `environment:` block with `${VAR}` interpolation. This is critical because `env_file:` is internally a list — override files append rather than replace, causing the production `.env` to leak into test containers. Explicit `environment:` vars with `--env-file` interpolation keeps environments fully isolated and allows clean overrides.
 - **`POLLER_ENABLED=false`** disables the poller container entirely. Implemented via `deploy.replicas: ${POLLER_REPLICAS:-1}` in `docker-compose.yml`. The mapping from `POLLER_ENABLED` to `POLLER_REPLICAS` happens in `cli/__init__.py` (`_compose_env()`) and the Makefile (`POLLER` flag). The derived `POLLER_REPLICAS` is injected as a shell env var in the SSH command (not in `.env`), so it takes precedence over the compose file default.
 - **`REMOTE_CLIENT_ENABLED=false`** disables the entire gateway stack: `ib-gateway`, `novnc`, `remote-client`, and `gateway-controller`. Same mechanism as poller: `deploy.replicas: ${GATEWAY_REPLICAS:-1}` on all four services, mapped from `REMOTE_CLIENT_ENABLED` via `_compose_env()` and the Makefile `REMOTE_CLIENT` flag. Gateway-specific required env vars (`TWS_USERID`, `TWS_PASSWORD`, `VNC_SERVER_PASSWORD`) use `:-` defaults in compose and are validated by the CLI when the gateway is enabled.
+- **`DEBUG_WEBHOOK_PATH`** enables the `ibkr-debug` container. When set (non-empty) in `.env`, `_compose_env()` sets `DEBUG_REPLICAS=1`; otherwise the compose default `${DEBUG_REPLICAS:-0}` keeps the container stopped. The debug service has aggressive log rotation (`max-size: 10k`, `max-file: 1`) since its sole purpose is transient payload inspection. Set `DEBUG_LOG_LEVEL=DEBUG` in `.env` to include full payload+headers in `docker logs`.
 - **`.dockerignore` uses an allowlist** (`*` to exclude everything, then `!services/poller/**` to include the whole module). Tests, `__pycache__`, and the Dockerfile itself are re-excluded. This means adding new source files to `services/poller/` requires **no** `.dockerignore` or Dockerfile changes.
 - **When adding a new standalone module** (e.g. `services/notifier/`), you must add a `!services/<module>/**` entry to `.dockerignore` — the allowlist excludes everything by default. Also add exclusions for test files and `__pycache__` under the new module. Without this, `COPY services/<module>/ ./<module>/` in the Dockerfile will fail with a cryptic "not found" error.
 - The poller Dockerfile uses directory COPYs (`COPY services/poller/poller/ ./poller/`, `COPY services/poller/poller_routes/ ./poller_routes/`) so new files are picked up automatically.
@@ -111,7 +121,7 @@
 
 ## Architecture
 
-Six Docker containers in a single Compose stack on a DigitalOcean droplet:
+Seven Docker containers in a single Compose stack on a DigitalOcean droplet:
 
 | Service              | Role                                                                                                                                                  |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -121,6 +131,7 @@ Six Docker containers in a single Compose stack on a DigitalOcean droplet:
 | `remote-client`      | Python API server — places orders via IB Gateway, optional real-time listener. Disabled (with entire gateway stack) via `REMOTE_CLIENT_ENABLED=false` |
 | `poller`             | Polls IBKR Flex for trade confirmations, fires webhooks. Disabled via `POLLER_ENABLED=false`                                                          |
 | `gateway-controller` | Lightweight sidecar — starts ib-gateway container via Docker socket                                                                                   |
+| `ibkr-debug`         | Debug webhook inbox — captures webhook payloads for inspection. Disabled by default (`DEBUG_REPLICAS=0`), enabled when `DEBUG_WEBHOOK_PATH` is set    |
 
 All secrets are injected via `.env` → `environment` in `docker-compose.yml`.
 Caddy reads `VNC_DOMAIN` and `SITE_DOMAIN` from env vars — the Caddyfile uses `{$VNC_DOMAIN}` / `{$SITE_DOMAIN}` syntax.
@@ -134,6 +145,7 @@ infra/caddy/
   Caddyfile              # Shell: imports from sites/, domains/, and shared dirs
   sites/
     ibkr.caddy           # SITE_DOMAIN route handlers (handle /ibkr/*)
+    debug.caddy          # Debug webhook routes (handle /debug/webhook/*)
   domains/
     ibkr-vnc.caddy       # VNC_DOMAIN site block (full site definition)
 ```
@@ -146,7 +158,7 @@ Shared projects deploy snippets to `/opt/caddy-shared/{sites,domains}/` on the d
 
 During shared deploy, snippet files are **templated** — all `{$VAR}` placeholders are replaced with literal env var values from the shared project's `.env`. This avoids requiring the host Caddy container to have the shared project's env vars.
 
-- **`sites/*.caddy`** contain `handle` blocks imported inside the `{$SITE_DOMAIN}` site definition. Each project writes one snippet (e.g. `ibkr.caddy`, `kraken.caddy`). Routes must be prefixed with the project name (`/ibkr/*`, `/kraken/*`) to avoid collisions.
+- **`sites/*.caddy`** contain `handle` blocks imported inside the `{$SITE_DOMAIN}` site definition. Each project writes one snippet (e.g. `ibkr.caddy`, `kraken.caddy`). Routes must be prefixed with the project name (`/ibkr/*`, `/kraken/*`) to avoid collisions. The `debug.caddy` snippet routes `/debug/webhook/*` to the `ibkr-debug` container.
 - **`domains/*.caddy`** contain full site definitions (e.g. `{$VNC_DOMAIN} { ... }`), imported at the top level.
 - This structure allows multiple projects to share a single Caddy instance on the same droplet.
 
@@ -214,6 +226,25 @@ The deployment mode is controlled by `DEPLOY_MODE` in `.env` (required, validate
   - **`with patch(...):`** inside the test — for single-test patches.
   - **`@patch(...)`** decorator — for single-test or single-class patches.
   - Never use bare `_patcher.start()` without registering a `.stop()`.
+- **Use `setUpModule()` / `tearDownModule()` for env var overrides.** When tests need specific `os.environ` values, save originals in `setUpModule()` and restore in `tearDownModule()`. Never mutate `os.environ` at module level without cleanup — the mutation leaks into every test module that runs afterward. The pattern:
+  ```python
+  _ORIG_ENV: dict[str, str | None] = {}
+  _TEST_ENV = {"MY_VAR": "test-value"}
+
+  def setUpModule() -> None:
+      for key, val in _TEST_ENV.items():
+          _ORIG_ENV[key] = os.environ.get(key)
+          os.environ[key] = val
+
+  def tearDownModule() -> None:
+      for key, orig in _ORIG_ENV.items():
+          if orig is None:
+              os.environ.pop(key, None)
+          else:
+              os.environ[key] = orig
+  ```
+  Both functions are called automatically by pytest/unittest — no manual invocation needed. Prefer this over `mock.patch.dict(os.environ, ...)` when the env vars must be set for the entire module (e.g. all test classes). For single-test env changes, use `with mock.patch.dict(os.environ, ...):` instead.
+- **Avoid reading env vars at module level in production code.** Module-level `os.environ` reads (e.g. `DEBUG_PATH = os.environ.get(...)`) bake values at import time, forcing tests to set env vars before imports — a fragile anti-pattern. Defer env reads to a factory function (e.g. `create_app()`) or constructor so tests can set env vars normally in `setUpModule()` and get fresh reads on each call.
 - **No cross-test dependencies.** Every test must be self-contained — it must not rely on state created by a previous test (e.g. a position opened by an earlier buy test). Pytest does not guarantee execution order, and tests may run selectively or in parallel. If a test needs preconditions, create them within the test itself or via an explicit fixture.
 - **E2E conftest fixtures must use `yield` with a context manager.** Never `return httpx.Client(...)` — the client is never closed and leaks sockets. Use `with httpx.Client(...) as client: yield client` instead. Scope to `session` (one client per test run). Every E2E `conftest.py` must also include a `_preflight_check` fixture (`scope="session"`, `autouse=True`) that hits `/health` and calls `pytest.exit()` if the stack is unreachable.
 - **E2E tests must use real Pydantic models, not `dict[str, Any]`.** When an E2E test receives a webhook payload or API response that matches a Pydantic model, parse it with `Model.model_validate_json(body)` (or `Model.model_validate(data)`) and access fields via attributes (`.data`, `.errors`), never via dict keys (`["data"]`). This ensures `make typecheck` catches field renames and typos at type-check time instead of at runtime. Never hand-roll TypedDicts that duplicate Pydantic model fields.
@@ -235,7 +266,7 @@ The `services/remote-client/` service is organized into packages:
 ```
 services/remote-client/
   main.py                  # Entrypoint (connection + HTTP server)
-  models_remote_client.py  # Pydantic request/response models (order API)
+  rc_models.py             # Pydantic request/response models (order API)
   client/                  # IB Gateway client (namespace delegation)
     __init__.py            # IBClient class (connection management)
     orders.py              # OrdersNamespace: place(contract_req, order_req)
@@ -272,7 +303,7 @@ The `services/poller/` service follows the same package pattern:
 ```
 services/poller/
   main.py                  # Entrypoint (polling loop + HTTP API startup)
-  models_poller.py         # Re-export shim (shared models + poller-specific API types)
+  poller_models.py         # Re-export shim (shared models + poller-specific API types)
   poller/                  # Core polling logic (package)
     __init__.py            # SQLite dedup, Flex fetch, poll_once()
     flex_parser.py         # XML parser (Activity Flex + Trade Confirmation)
@@ -292,7 +323,7 @@ services/poller/
 
 - **`services/poller/poller/`** contains core logic: SQLite dedup, Flex Web Service two-step fetch, and `poll_once()`. Notification delivery is delegated to the notifier package (see below).
 - **`services/poller/poller_routes/`** contains the HTTP API for on-demand polls (`POST /ibkr/poller/run`).
-- **`services/poller/models_poller.py`** is a re-export shim for shared models plus poller-specific API types (`RunPollResponse`, `HealthResponse`). The shared models (`Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`) live in `services/shared/__init__.py`.
+- **`services/poller/poller_models.py`** is a re-export shim for shared models plus poller-specific API types (`RunPollResponse`, `HealthResponse`). The shared models (`Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`) live in `services/shared/__init__.py`.
 
 ## Notifier Structure
 
@@ -301,7 +332,7 @@ The `services/notifier/` package is a **standalone library** (no container, no D
 ```
 services/notifier/
   __init__.py              # Registry, load_notifiers(), validate_notifier_env(), notify()
-  base.py                  # BaseNotifier ABC (name, required_env_vars, send)
+  base.py                  # BaseNotifier ABC (name, required_env_vars, send, default env validation)
   webhook.py               # WebhookNotifier: HMAC-SHA256 signed HTTP POST
   test_notifier.py         # Tests for registry and loader
   test_webhook.py          # Tests for webhook backend
@@ -309,9 +340,31 @@ services/notifier/
 
 - **`NOTIFIERS` env var** controls which backends are active (comma-separated, e.g. `NOTIFIERS=webhook`). Empty = no notifications (dry-run).
 - **Suffix support** — `load_notifiers(suffix="_2")` reads from `TARGET_WEBHOOK_URL_2`, `WEBHOOK_SECRET_2`, etc. This powers `poller-2`.
-- **`validate_notifier_env()`** is called by `cli/__init__.py` during pre-deploy checks to ensure all required env vars are set for the configured backends.
-- **Adding a new backend** — create `services/notifier/<name>.py` with a class extending `BaseNotifier`, add it to `REGISTRY` in `__init__.py`.
+- **Validation belongs in each notifier's `__init__`, not the coordinator.** The coordinator (`__init__.py`) is a registry + dispatcher — it must not contain backend-specific validation logic (e.g. "skip `TARGET_WEBHOOK_URL` when `DEBUG_WEBHOOK_PATH` is set"). Each `BaseNotifier` subclass validates its own env vars in its constructor and raises `SystemExit(1)` on misconfiguration. The base class provides a default validation that checks `required_env_vars()`; subclasses with custom logic (like `WebhookNotifier`'s debug-path skip) override `__init__` entirely.
+- **`validate_notifier_env()`** is called by `cli/__init__.py` during pre-deploy checks. It instantiates each configured backend (triggering constructor validation) and converts `SystemExit` to a `die()` call for CLI-friendly output.
+- **Adding a new backend** — create `services/notifier/<name>.py` with a class extending `BaseNotifier`, add it to `REGISTRY` in `__init__.py`. The constructor must validate all required env vars.
 - **The poller calls `notify(notifiers, payload)`** — notifiers are loaded once at startup and passed through to `poll_once()`. The poller has no direct knowledge of webhook delivery mechanics.
+- **Debug webhook URL resolution** — `WebhookNotifier.__init__` calls `_resolve_webhook_url(suffix)`, a pure function in `webhook.py`. If `DEBUG_WEBHOOK_PATH` is set, the URL is overridden to `http://ibkr-debug:9000/debug/webhook/{path}` (container-to-container DNS). Otherwise, it reads `TARGET_WEBHOOK_URL{suffix}`. The service name (`ibkr-debug`) and port (`9000`) are hardcoded constants in `webhook.py`. No env var mutation occurs — the resolved URL is stored in `self._url`.
+
+## Debug Webhook Service
+
+The `services/debug/` service is a **standalone aiohttp container** that captures webhook payloads for inspection during development and debugging.
+
+```
+services/debug/
+  debug_app.py             # aiohttp app: POST/GET/DELETE /debug/webhook/{path} + GET /health
+  Dockerfile               # python:3.11-slim, runs debug_app.py
+  requirements.txt         # aiohttp only
+  test_debug.py            # Unit tests (10 tests)
+```
+
+- **`DEBUG_WEBHOOK_PATH`** env var controls the accepted path segment. Requests to any other path return 404. When unset, the container is not running (`DEBUG_REPLICAS=0`).
+- **In-memory inbox** — `_inbox: list[PayloadEntry]` stores received payloads (payload + headers + timestamp). Capped at `MAX_DEBUG_WEBHOOK_PAYLOADS` (default 100, hard max 150) with FIFO eviction.
+- **Endpoints**: `POST /debug/webhook/{path}` captures a payload, `GET` returns all stored payloads, `DELETE` clears the inbox. `GET /health` returns status.
+- **Logging**: Summary at INFO level, full payload+headers at DEBUG level. Set `DEBUG_LOG_LEVEL=DEBUG` in `.env` and `docker logs -f ibkr-debug` to tail payloads. Aggressive log rotation (`max-size: 10k`, `max-file: 1`) keeps disk usage minimal.
+- **No auth** — the debug path in the URL acts as a shared secret. The service is not exposed to the internet unless Caddy routes to it via `debug.caddy`.
+- **Port 9000** is hardcoded (`HTTP_PORT = 9000`). In production, Caddy reverse-proxies to `ibkr-debug:9000` — no host port mapping needed. Local dev uses `15003:9000` (`docker-compose.local.yml`), E2E uses `15012:9000` (`docker-compose.test.yml`).
+- **Module name**: `debug_app.py` (not `main.py`) to avoid `sys.modules` collisions with `services/poller/main.py` and `services/remote-client/main.py` when all three are on `sys.path`.
 
 ## Dedup Structure
 
@@ -357,16 +410,16 @@ This project has **three model locations** — a shared source of truth and two 
 | File                                             | Domain                | Contains                                                                                                                                      |
 | ------------------------------------------------ | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `services/shared/__init__.py`                    | CommonFill (outbound) | `Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `aggregate_fills()`, `_dedup_id()` |
-| `services/poller/models_poller.py`               | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                                                                |
-| `services/remote-client/models_remote_client.py` | Order API (inbound)   | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types                                                 |
+| `services/poller/poller_models.py`               | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                                                                |
+| `services/remote-client/rc_models.py`            | Order API (inbound)   | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types                                                 |
 
 - **`services/shared/__init__.py`** is the single source of truth for all webhook payload models. Both poller and remote-client import from it.
-- **Unique filenames** (`models_poller.py`, `models_remote_client.py`) prevent import collisions when both `services/poller/` and `services/remote-client/` are on `sys.path` (via the `.pth` file). Use `from shared import Fill` for shared types, `from models_poller import RunPollResponse` for poller-specific types.
+- **Unique filenames** (`poller_models.py`, `rc_models.py`) prevent import collisions when both `services/poller/` and `services/remote-client/` are on `sys.path` (via the `.pth` file). Use `from shared import Fill` for shared types, `from poller_models import RunPollResponse` for poller-specific types.
 - **Model shims only re-export models and types** (Pydantic models, enums, type aliases). Utility functions (`aggregate_fills`, `normalize_order_type`, `_dedup_id`) must be imported directly from the owning module: `from shared import aggregate_fills`. Never re-export functions through model shims.
-- `models_poller.py` re-exports shared models and defines poller-specific API types. Its `SCHEMA_MODELS` contains only `[RunPollResponse, HealthResponse]`.
+- `poller_models.py` re-exports shared models and defines poller-specific API types. Its `SCHEMA_MODELS` contains only `[RunPollResponse, HealthResponse]`.
 - `shared/__init__.py` defines `SCHEMA_MODELS = [WebhookPayloadTrades, Trade, Fill]` for the shared types.
-- `models_remote_client.py` is the source of truth for `IbkrHttp` TypeScript types (`make types`).
-- `models_remote_client.py` uses strict `Literal` types (`Action`, `OrderType`, `SecType`, `TimeInForce`) aligned with `ib_async` field names.
+- `rc_models.py` is the source of truth for `IbkrHttp` TypeScript types (`make types`).
+- `rc_models.py` uses strict `Literal` types (`Action`, `OrderType`, `SecType`, `TimeInForce`) aligned with `ib_async` field names.
 - All external-contract models use `ConfigDict(extra="forbid")` for strict validation.
 
 ## Naming Convention for API Models
@@ -443,8 +496,8 @@ export * as Kraken from "./shared";
 - **Three namespaces**: `Ibkr` (shared webhook payload types), `IbkrPoller` (poller-specific API types), and `IbkrHttp` (order API types).
 - **`make types`** regenerates all three from Pydantic models:
   - `services/shared/__init__.py` → `types/shared/types.d.ts` (CommonFill models: WebhookPayloadTrades, Trade, Fill, BuySell)
-  - `services/poller/models_poller.py` → `types/poller/types.d.ts` (poller-specific: RunPollResponse, HealthResponse)
-  - `services/remote-client/models_remote_client.py` → `types/http/types.d.ts` (order API types)
+  - `services/poller/poller_models.py` → `types/poller/types.d.ts` (poller-specific: RunPollResponse, HealthResponse)
+  - `services/remote-client/rc_models.py` → `types/http/types.d.ts` (order API types)
 - **Structure:**
   ```
   types/
@@ -456,15 +509,15 @@ export * as Kraken from "./shared";
       types.schema.json         # Intermediate JSON Schema
     poller/
       index.d.ts               # Re-exports: RunPollResponse, HealthResponse
-      types.d.ts               # Generated from poller/models_poller.py (SCHEMA_MODELS)
+      types.d.ts               # Generated from poller/poller_models.py (SCHEMA_MODELS)
       types.schema.json         # Intermediate JSON Schema
     http/
       index.d.ts               # Re-exports: PlaceOrderPayload, ContractPayload, OrderPayload, PlaceOrderResponse
-      types.d.ts               # Generated from remote-client/models_remote_client.py (SCHEMA_MODELS)
+      types.d.ts               # Generated from remote-client/rc_models.py (SCHEMA_MODELS)
       types.schema.json         # Intermediate JSON Schema
   ```
 - **Usage:** `import { Ibkr, IbkrPoller, IbkrHttp } from "@tradegist/ibkr-relay-types"`
-- Each model file declares a `SCHEMA_MODELS` list at the bottom — `schema_gen.py` reads it to generate the JSON Schema. **To export a new model to TypeScript, append it to `SCHEMA_MODELS` in the relevant `models_*.py` or `shared/__init__.py` file and update the corresponding `types/*/index.d.ts` re-exports.**
+- Each model file declares a `SCHEMA_MODELS` list at the bottom — `schema_gen.py` reads it to generate the JSON Schema. **To export a new model to TypeScript, append it to `SCHEMA_MODELS` in the relevant model shim (`poller_models.py`, `rc_models.py`) or `shared/__init__.py` file and update the corresponding `types/*/index.d.ts` re-exports.**
 
 ## Code Style
 
@@ -518,7 +571,7 @@ python3 -m cli poll 2
 
 ```
 .env.example            # Template — copy to .env and fill in real values
-docker-compose.yml      # All 6 services
+docker-compose.yml      # All 7 services
 docker-compose.shared.yml # Shared-mode overlay (disables Caddy, uses relay-net)
 docker-compose.local.yml  # Local dev override (direct port access, no TLS)
 cli/                    # Python CLI (operator scripts)
@@ -534,13 +587,15 @@ cli/                    # Python CLI (operator scripts)
 services/               # Business-logic services (user-facing features)
   remote-client/        # remote-client service (see Remote Client Structure above)
   poller/               # Flex poller service (see Poller Structure above)
-    models_poller.py    # Pydantic models: Fill, Trade, WebhookPayloadTrades, WebhookPayload, BuySell, Source
+    poller_models.py    # Pydantic models: Fill, Trade, WebhookPayloadTrades, WebhookPayload, BuySell, Source
+  debug/                # Debug webhook inbox service (see Debug Webhook Service below)
   notifier/             # Pluggable notification backends (library, no container)
   dedup/                # Shared SQLite dedup library (library, no container)
 infra/                  # Infrastructure backbone (no business logic)
   caddy/Caddyfile       # Reverse proxy config (uses env vars for domains)
   caddy/sites/          # Route snippets imported inside {$SITE_DOMAIN}
     ibkr.caddy          # /ibkr/* routes (poller, remote-client)
+    debug.caddy          # /debug/webhook/* → ibkr-debug:9000
   caddy/domains/        # Full site blocks imported at top level
     ibkr-vnc.caddy      # {$VNC_DOMAIN} block (novnc + gateway-controller)
   gateway-controller/   # CGI sidecar (Alpine, busybox httpd)

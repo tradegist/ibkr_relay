@@ -79,6 +79,10 @@ def _compose_env():
                 file=sys.stderr,
             )
 
+    # DEBUG_REPLICAS: auto-enable debug service when DEBUG_WEBHOOK_PATH is set
+    if os.environ.get("DEBUG_WEBHOOK_PATH", "").strip():
+        env_vars["DEBUG_REPLICAS"] = "1"
+
     return env_vars
 
 

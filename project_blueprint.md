@@ -305,7 +305,7 @@ kraken_relay/
 │   │   ├── Dockerfile
 │   │   ├── requirements.txt
 │   │   ├── main.py              # Entrypoint (polling loop + HTTP API)
-│   │   ├── models_poller.py     # Re-export shim (imports from shared with `X as X`)
+│   │   ├── poller_models.py     # Re-export shim (imports from shared with `X as X`)
 │   │   ├── poller/              # Core polling logic (package)
 │   │   │   ├── __init__.py      # poll_once(), watermark management
 │   │   │   ├── rest_client.py   # Kraken REST API client (authenticated)
@@ -578,7 +578,7 @@ the watermark table independently.
 
 All webhook payload models live in `services/shared/__init__.py` — the **single
 source of truth**. Service-specific files (`models_listener.py`,
-`models_poller.py`) are re-export shims so existing imports like
+`poller_models.py`) are re-export shims so existing imports like
 `from models_listener import Fill` keep working. **Shims only re-export
 models and types** (Pydantic models, enums, type aliases). Utility functions
 (`aggregate_fills`, `normalize_order_type`) must be imported
@@ -783,7 +783,7 @@ the README for webhook consumers.
 
 ### Re-export Shims
 
-`models_listener.py` and `models_poller.py` re-export **only models and types**
+`models_listener.py` and `poller_models.py` re-export **only models and types**
 from shared:
 
 ```python
@@ -1431,7 +1431,7 @@ typecheck:
 ```
 
 Both listener and poller need `services/shared` because their shim files
-(`models_listener.py`, `models_poller.py`) re-export from `shared`. The
+(`models_listener.py`, `poller_models.py`) re-export from `shared`. The
 `shared` module itself is checked independently — it has no external
 dependencies beyond stdlib + pydantic.
 
@@ -1511,7 +1511,7 @@ select = ["F", "E", "W", "I", "UP", "B", "SIM", "RUF", "PGH003"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["listener", "poller", "shared", "notifier", "dedup", "routes", "models_listener", "models_poller"]
+known-first-party = ["listener", "poller", "shared", "notifier", "dedup", "routes", "models_listener", "poller_models"]
 ```
 
 ---
@@ -1575,7 +1575,7 @@ Build in this sequence. Run `make lint`, `make typecheck`, and `make test` after
 every step.
 
 1. **Scaffold** — repo init, `.gitignore`, `README.md`, `pyproject.toml`, `requirements-dev.txt`, `Makefile` (setup/lint/typecheck/test targets), empty `services/` dirs.
-2. **Shared models** — `services/shared/__init__.py` with `Fill`, `Trade`, `WebhookPayload`, `BuySell`, `OrderType`, `normalize_order_type()`. Create re-export shims (`models_listener.py`, `models_poller.py`). Write tests. Add `services/shared/kraken_types.py` with TypedDicts for Kraken API structures.
+2. **Shared models** — `services/shared/__init__.py` with `Fill`, `Trade`, `WebhookPayload`, `BuySell`, `OrderType`, `normalize_order_type()`. Create re-export shims (`models_listener.py`, `poller_models.py`). Write tests. Add `services/shared/kraken_types.py` with TypedDicts for Kraken API structures.
 3. **Dedup** — `services/dedup/` shared module (SQLite init, check, mark, prune). Write tests.
 4. **Notifier** — `services/notifier/` (base ABC, webhook backend, registry, loader). Copy from `ibkr_relay` and adapt. Write tests.
 5. **WS Parser** — `listener/ws_parser.py` (parse Kraken WS JSON into Fill models). Write tests with sample messages.

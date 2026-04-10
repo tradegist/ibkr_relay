@@ -1,7 +1,7 @@
 """Re-export shared models + poller-specific API types.
 
 Shared models live in ``services/shared/``. This shim re-exports them so
-existing ``from models_poller import Fill`` imports keep working.
+existing ``from poller_models import Fill`` imports keep working.
 Service-specific models (RunPollResponse, HealthResponse) live here.
 """
 

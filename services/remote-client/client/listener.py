@@ -16,15 +16,15 @@ from ib_async.objects import CommissionReport
 from ib_async.objects import Fill as IBFill
 
 from dedup import get_processed_ids, is_processed, mark_processed_batch, prune
-from models_poller import (
+from notifier import notify
+from notifier.base import BaseNotifier
+from poller_models import (
     BuySell,
     Fill,
     Source,
     Trade,
     WebhookPayloadTrades,
 )
-from notifier import notify
-from notifier.base import BaseNotifier
 from shared import aggregate_fills, normalize_asset_class
 
 log = logging.getLogger("ib-listener")

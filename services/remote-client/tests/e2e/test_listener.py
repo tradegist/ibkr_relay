@@ -2,7 +2,7 @@
 
 The listener subscribes to ib_async execDetailsEvent and commissionReportEvent.
 When the remote-client places a paper order, ib_async emits both events.
-Each event fires a webhook to a receiver started by these tests.
+Each event fires a webhook to the debug inbox container (ibkr-debug).
 
 NOTE: These tests only produce webhooks when the market is open and orders
 actually fill.  When the market is closed, orders stay PreSubmitted and no
@@ -11,11 +11,10 @@ execution events are emitted.  Tests skip gracefully in that case.
 
 import hashlib
 import hmac
-import threading
 import time
 from collections.abc import Generator
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, ClassVar, TypedDict
+from datetime import datetime
+from typing import TypedDict
 
 import httpx
 import pytest
@@ -23,54 +22,48 @@ import pytest
 from shared import WebhookPayloadTrades
 
 WEBHOOK_SECRET = "test-webhook-secret"
+_DEBUG_INBOX_PATH = "/debug/webhook/test-debug-path"
 
 
 # ── Typed webhook entry ──────────────────────────────────────────────────
 
 
 class _WebhookEntry(TypedDict):
-    """Single entry collected by the webhook receiver."""
+    """Single entry fetched from the debug webhook inbox."""
 
     body: WebhookPayloadTrades
     signature: str
-    raw: bytes
-    received_at: float
+    received_at: str  # ISO timestamp
 
 
-# ── Webhook receiver ────────────────────────────────────────────────────
+# ── Debug inbox helpers ──────────────────────────────────────────────────
 
 
-class _WebhookHandler(BaseHTTPRequestHandler):
-    """Collects incoming webhook payloads into a shared list."""
+def _fetch_inbox(client: httpx.Client) -> list[_WebhookEntry]:
+    """Fetch and parse all entries from the debug webhook inbox."""
+    resp = client.get(_DEBUG_INBOX_PATH)
+    resp.raise_for_status()
+    entries: list[_WebhookEntry] = []
+    for raw in resp.json()["payloads"]:
+        entries.append({
+            "body": WebhookPayloadTrades.model_validate(raw["payload"]),
+            "signature": raw["headers"].get("X-Signature-256", ""),
+            "received_at": raw["received_at"],
+        })
+    return entries
 
-    received: ClassVar[list[_WebhookEntry]] = []
 
-    def do_POST(self) -> None:
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length)
-        entry: _WebhookEntry = {
-            "body": WebhookPayloadTrades.model_validate_json(body),
-            "signature": self.headers.get("X-Signature-256", ""),
-            "raw": body,
-            "received_at": time.monotonic(),
-        }
-        self.received.append(entry)
-        self.send_response(200)
-        self.end_headers()
-
-    def log_message(self, format: str, *args: Any) -> None:
-        pass  # suppress access log noise during tests
+def _clear_inbox(client: httpx.Client) -> None:
+    """Clear all entries from the debug webhook inbox."""
+    resp = client.delete(_DEBUG_INBOX_PATH)
+    resp.raise_for_status()
 
 
 @pytest.fixture(scope="module")
-def webhook_payloads() -> Generator[list[_WebhookEntry]]:
-    """Start a webhook receiver on port 19999 for the duration of this module."""
-    _WebhookHandler.received = []
-    server = HTTPServer(("0.0.0.0", 19999), _WebhookHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield _WebhookHandler.received
-    server.shutdown()
+def debug_inbox() -> Generator[httpx.Client]:
+    """HTTP client for the debug webhook inbox (ibkr-debug on port 15012)."""
+    with httpx.Client(base_url="http://localhost:15012", timeout=10) as client:
+        yield client
 
 
 def _wait_for_fill(api: httpx.Client, order_id: int, timeout: float = 10) -> bool:
@@ -86,17 +79,34 @@ def _wait_for_fill(api: httpx.Client, order_id: int, timeout: float = 10) -> boo
     return False
 
 
+def _poll_inbox(
+    client: httpx.Client,
+    *,
+    min_count: int = 1,
+    timeout: float = 15,
+) -> list[_WebhookEntry]:
+    """Poll the debug inbox until at least *min_count* entries appear."""
+    deadline = time.monotonic() + timeout
+    entries: list[_WebhookEntry] = []
+    while time.monotonic() < deadline:
+        entries = _fetch_inbox(client)
+        if len(entries) >= min_count:
+            return entries
+        time.sleep(0.5)
+    return entries
+
+
 # ── Tests ────────────────────────────────────────────────────────────────
 
 
 def test_listener_fires_on_market_order(
-    api: httpx.Client, webhook_payloads: list[_WebhookEntry],
+    api: httpx.Client, debug_inbox: httpx.Client,
 ) -> None:
     """Place MKT BUY → expect execDetailsEvent + commissionReportEvent webhooks.
 
     Skips when the market is closed (orders don't fill → no execution events).
     """
-    baseline = len(webhook_payloads)
+    _clear_inbox(debug_inbox)
 
     resp = api.post(
         "/ibkr/order",
@@ -113,17 +123,11 @@ def test_listener_fires_on_market_order(
         pytest.skip("Market appears closed — order did not fill, no execution events expected")
 
     # Wait for at least 2 webhooks (exec + commission)
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if len(webhook_payloads) >= baseline + 2:
-            break
-        time.sleep(0.5)
-
-    new = webhook_payloads[baseline:]
-    assert len(new) >= 2, f"Expected >= 2 webhooks, got {len(new)}"
+    entries = _poll_inbox(debug_inbox, min_count=2, timeout=15)
+    assert len(entries) >= 2, f"Expected >= 2 webhooks, got {len(entries)}"
 
     # Verify payload structure
-    for entry in new:
+    for entry in entries:
         payload = entry["body"]
         assert len(payload.data) == 1
 
@@ -133,21 +137,28 @@ def test_listener_fires_on_market_order(
         assert trade.side == "buy"
 
     # Both event types must be present
-    sources = {e["body"].data[0].source for e in new}
+    sources = {e["body"].data[0].source for e in entries}
     assert "execDetailsEvent" in sources, f"Missing execDetailsEvent, got: {sources}"
     assert "commissionReportEvent" in sources, f"Missing commissionReportEvent, got: {sources}"
 
 
 def test_webhook_hmac_signature(
-    webhook_payloads: list[_WebhookEntry],
+    debug_inbox: httpx.Client,
 ) -> None:
-    """Verify all received webhooks have valid HMAC-SHA256 signatures."""
-    if len(webhook_payloads) == 0:
+    """Verify all received webhooks have valid HMAC-SHA256 signatures.
+
+    Reconstructs the original body via Pydantic round-trip (the debug inbox
+    stores parsed JSON, not raw bytes).
+    """
+    entries = _fetch_inbox(debug_inbox)
+    if len(entries) == 0:
         pytest.skip("No webhooks received (market likely closed)")
 
-    for entry in webhook_payloads:
+    for entry in entries:
+        # Reconstruct the body as the notifier produces it
+        reconstructed = entry["body"].model_dump_json(indent=2).encode()
         expected = "sha256=" + hmac.new(
-            WEBHOOK_SECRET.encode(), entry["raw"], hashlib.sha256,
+            WEBHOOK_SECRET.encode(), reconstructed, hashlib.sha256,
         ).hexdigest()
         assert hmac.compare_digest(entry["signature"], expected), (
             f"HMAC mismatch: got {entry['signature']!r}"
@@ -155,11 +166,12 @@ def test_webhook_hmac_signature(
 
 
 def test_commission_report_has_commission(
-    webhook_payloads: list[_WebhookEntry],
+    debug_inbox: httpx.Client,
 ) -> None:
     """The commissionReportEvent webhook should include fee > 0."""
+    entries = _fetch_inbox(debug_inbox)
     commission_entries = [
-        e for e in webhook_payloads
+        e for e in entries
         if e["body"].data[0].source == "commissionReportEvent"
     ]
     if len(commission_entries) == 0:
@@ -171,7 +183,7 @@ def test_commission_report_has_commission(
 
 
 def test_debounce_path_fires_webhook(
-    api: httpx.Client, webhook_payloads: list[_WebhookEntry],
+    api: httpx.Client, debug_inbox: httpx.Client,
 ) -> None:
     """With LISTENER_EVENT_DEBOUNCE_TIME=2000, commissionReportEvent goes through
     the debounce path: enqueue → timer → flush → aggregate → webhook.
@@ -179,7 +191,7 @@ def test_debounce_path_fires_webhook(
     Verify the webhook arrives after at least ~2s (the debounce window) and
     contains the expected aggregated fields (execIds, fillCount).
     """
-    baseline = len(webhook_payloads)
+    _clear_inbox(debug_inbox)
 
     resp = api.post(
         "/ibkr/order",
@@ -197,9 +209,11 @@ def test_debounce_path_fires_webhook(
 
     # execDetailsEvent arrives immediately (no debounce) — filter by THIS order
     deadline = time.monotonic() + 5
+    exec_events: list[_WebhookEntry] = []
     while time.monotonic() < deadline:
+        entries = _fetch_inbox(debug_inbox)
         exec_events = [
-            e for e in webhook_payloads[baseline:]
+            e for e in entries
             if e["body"].data[0].source == "execDetailsEvent"
             and str(e["body"].data[0].orderId) == str(order_id)
         ]
@@ -212,9 +226,10 @@ def test_debounce_path_fires_webhook(
     # Filter by THIS order's orderId to avoid picking up stale events from
     # prior tests whose debounced webhooks may arrive after our baseline.
     deadline = time.monotonic() + 10
-    commission_event = None
+    commission_event: _WebhookEntry | None = None
     while time.monotonic() < deadline:
-        for e in webhook_payloads[baseline:]:
+        entries = _fetch_inbox(debug_inbox)
+        for e in entries:
             t = e["body"].data[0]
             if (t.source == "commissionReportEvent"
                     and str(t.orderId) == str(order_id)):
@@ -234,13 +249,10 @@ def test_debounce_path_fires_webhook(
     assert trade.side == "buy"
 
     # Measure the gap between execDetailsEvent and commissionReportEvent arrival
-    # times. The /ibkr/order API blocks until IB fills the order, so t0-based
-    # timing is unreliable. Instead, the gap between the two webhook arrivals
-    # approximates the debounce window (2s) because execDetailsEvent fires
-    # immediately while commissionReportEvent is buffered.
-    exec_arrived = exec_events[0]["received_at"]
-    comm_arrived = commission_event["received_at"]
-    gap = comm_arrived - exec_arrived
+    # times via ISO timestamps from the debug inbox.
+    exec_arrived = datetime.fromisoformat(exec_events[0]["received_at"])
+    comm_arrived = datetime.fromisoformat(commission_event["received_at"])
+    gap = (comm_arrived - exec_arrived).total_seconds()
     assert gap >= 1.5, (
         f"commissionReportEvent arrived only {gap:.1f}s after execDetailsEvent, "
         "debounce path may not have been used (expected >= 1.5s for 2s debounce)"

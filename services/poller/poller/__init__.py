@@ -11,9 +11,9 @@ import httpx
 
 from dedup import get_processed_ids, mark_processed_batch, prune
 from dedup import init_db as _init_dedup_db
-from models_poller import Trade, WebhookPayloadTrades
 from notifier import notify
 from notifier.base import BaseNotifier
+from poller_models import Trade, WebhookPayloadTrades
 from shared import aggregate_fills
 
 from .flex_parser import parse_fills
@@ -21,29 +21,56 @@ from .flex_parser import parse_fills
 log = logging.getLogger("poller")
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration — one getter per env var, single source of truth
 # ---------------------------------------------------------------------------
-FLEX_TOKEN = os.environ.get("IBKR_FLEX_TOKEN", "")
-FLEX_QUERY_ID = os.environ.get("IBKR_FLEX_QUERY_ID", "")
-POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "600"))
-DEDUP_DB_PATH = os.environ.get("DEDUP_DB_PATH", "/data/dedup/fills.db")
-META_DB_PATH = os.environ.get("META_DB_PATH", "/data/meta.db")
-
 FLEX_BASE = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService"
 USER_AGENT = "ibkr-relay/1.0"
+
+
+def get_flex_token() -> str:
+    val = os.environ.get("IBKR_FLEX_TOKEN", "").strip()
+    if not val:
+        raise SystemExit("IBKR_FLEX_TOKEN must be set")
+    return val
+
+
+def get_flex_query_id() -> str:
+    val = os.environ.get("IBKR_FLEX_QUERY_ID", "").strip()
+    if not val:
+        raise SystemExit("IBKR_FLEX_QUERY_ID must be set")
+    return val
+
+
+def get_poll_interval() -> int:
+    raw = os.environ.get("POLL_INTERVAL_SECONDS", "600").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        raise SystemExit(
+            f"Invalid POLL_INTERVAL_SECONDS={raw!r} — must be an integer"
+        ) from None
+
+
+def get_dedup_db_path() -> str:
+    return os.environ.get("DEDUP_DB_PATH", "/data/dedup/fills.db").strip()
+
+
+def get_meta_db_path() -> str:
+    return os.environ.get("META_DB_PATH", "/data/meta.db").strip()
 
 
 # ---------------------------------------------------------------------------
 # SQLite — shared dedup DB + poller-specific metadata DB
 # ---------------------------------------------------------------------------
-def init_dedup_db() -> sqlite3.Connection:
+def init_dedup_db(db_path: str | None = None) -> sqlite3.Connection:
     """Open the shared dedup database (cross-service, WAL mode)."""
-    return _init_dedup_db(Path(DEDUP_DB_PATH))
+    path = db_path or get_dedup_db_path()
+    return _init_dedup_db(Path(path))
 
 
-def init_meta_db() -> sqlite3.Connection:
+def init_meta_db(db_path: str | None = None) -> sqlite3.Connection:
     """Open the poller-specific metadata database (watermark)."""
-    path = Path(META_DB_PATH)
+    path = Path(db_path or get_meta_db_path())
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.execute("""
@@ -82,8 +109,8 @@ def prune_old(dedup_conn: sqlite3.Connection, days: int = 30) -> None:
 # ---------------------------------------------------------------------------
 def fetch_flex_report(flex_token: str | None = None, flex_query_id: str | None = None) -> str | None:
     """Two-step Flex Web Service: SendRequest -> GetStatement."""
-    token = flex_token or FLEX_TOKEN
-    query_id = flex_query_id or FLEX_QUERY_ID
+    token = flex_token or get_flex_token()
+    query_id = flex_query_id or get_flex_query_id()
     headers = {"User-Agent": USER_AGENT}
 
     # Step 1: request report generation

@@ -25,3 +25,8 @@ services/dedup/**/__pycache__/
 !services/shared/**
 services/shared/**/test_*.py
 services/shared/**/__pycache__/
+
+!services/debug/**
+services/debug/Dockerfile
+services/debug/**/test_*.py
+services/debug/**/__pycache__/

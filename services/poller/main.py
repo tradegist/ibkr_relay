@@ -7,9 +7,9 @@ import sys
 from notifier import load_notifiers
 from notifier.base import BaseNotifier
 from poller import (
-    FLEX_QUERY_ID,
-    FLEX_TOKEN,
-    POLL_INTERVAL,
+    get_flex_query_id,
+    get_flex_token,
+    get_poll_interval,
     init_dedup_db,
     init_meta_db,
     poll_once,
@@ -30,6 +30,7 @@ async def _poll_loop(
     notifiers: list[BaseNotifier],
 ) -> None:
     """Run poll_once in a thread at regular intervals."""
+    poll_interval = get_poll_interval()
     while True:
         try:
             async with poll_lock:
@@ -37,17 +38,17 @@ async def _poll_loop(
         except Exception:
             log.exception("Poll cycle failed")
 
-        log.debug("Next poll in %ds", POLL_INTERVAL)
-        await asyncio.sleep(POLL_INTERVAL)
+        log.debug("Next poll in %ds", poll_interval)
+        await asyncio.sleep(poll_interval)
 
 
 async def amain() -> None:
     """Continuous polling loop with HTTP API for on-demand polls."""
-    if not FLEX_TOKEN or not FLEX_QUERY_ID:
-        log.error("IBKR_FLEX_TOKEN and IBKR_FLEX_QUERY_ID must be set")
-        raise SystemExit(1)
+    get_flex_token()  # fail fast if missing
+    get_flex_query_id()  # fail fast if missing
+    poll_interval = get_poll_interval()
 
-    log.info("IBKR Flex Poller starting (poll every %ds)", POLL_INTERVAL)
+    log.info("IBKR Flex Poller starting (poll every %ds)", poll_interval)
 
     notifiers = load_notifiers()
     if not notifiers:
@@ -66,9 +67,8 @@ async def amain() -> None:
 
 def main_once() -> None:
     """Single on-demand poll, then exit."""
-    if not FLEX_TOKEN or not FLEX_QUERY_ID:
-        log.error("IBKR_FLEX_TOKEN and IBKR_FLEX_QUERY_ID must be set")
-        raise SystemExit(1)
+    get_flex_token()  # fail fast if missing
+    get_flex_query_id()  # fail fast if missing
 
     debug = "--debug" in sys.argv
     replay = 0

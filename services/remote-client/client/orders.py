@@ -5,7 +5,7 @@ import logging
 
 from ib_async import IB, Contract, LimitOrder, MarketOrder, Order
 
-from models_remote_client import ContractPayload, OrderPayload, PlaceOrderResponse
+from rc_models import ContractPayload, OrderPayload, PlaceOrderResponse
 
 log = logging.getLogger("ib-client")
 
