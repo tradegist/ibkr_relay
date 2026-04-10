@@ -14,10 +14,12 @@ class BaseNotifier(ABC):
 
     Subclasses MUST validate their own configuration in ``__init__``.
     The default implementation checks that every var from ``required_env_vars()``
-    is present as ``{var}{suffix}`` in the environment, logging and raising
-    ``SystemExit(1)`` on any missing var.  Subclasses that need custom
-    validation logic (e.g. skipping a var when a fallback is available)
-    should override ``__init__`` entirely.
+    is present as ``{var}{suffix}`` in the environment, logs an actionable
+    error, and raises ``SystemExit`` with that descriptive message on any
+    missing var.  Callers may surface the message directly (for example, from
+    ``validate_notifier_env()``).  Subclasses that need custom validation
+    logic (e.g. skipping a var when a fallback is available) should override
+    ``__init__`` entirely.
     """
 
     name: str

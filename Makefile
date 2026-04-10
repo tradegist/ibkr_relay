@@ -94,7 +94,7 @@ typecheck: ## Run mypy strict type checking
 	MYPYPATH=services $(PYTHON) -m mypy services/notifier/
 	MYPYPATH=services $(PYTHON) -m mypy services/dedup/
 	MYPYPATH=services $(PYTHON) -m mypy services/shared/
-	$(PYTHON) -m mypy services/debug/debug_app.py
+	MYPYPATH=services/debug $(PYTHON) -m mypy services/debug/
 	$(PYTHON) -m mypy schema_gen.py
 
 lint: ## Run ruff linter (use FIX=1 to auto-fix)
@@ -111,7 +111,8 @@ local-up: ## Start full stack locally (no TLS, direct port access)
 		if [ "$$pe" = "false" ] || [ "$$pe" = "0" ] || [ "$$pe" = "no" ] || [ -z "$$pe" ]; then \
 			export POLLER_REPLICAS=$${POLLER_REPLICAS:-0}; \
 		fi; \
-		if [ -n "$${DEBUG_WEBHOOK_PATH:-}" ]; then \
+		debug_webhook_path="$${DEBUG_WEBHOOK_PATH:-}"; \
+		if [ -n "$$(printf '%s' "$$debug_webhook_path" | tr -d '[:space:]')" ]; then \
 			export DEBUG_REPLICAS=$${DEBUG_REPLICAS:-1}; \
 		fi; \
 	fi && \
@@ -121,7 +122,7 @@ local-up: ## Start full stack locally (no TLS, direct port access)
 	@echo "  Poller:   http://localhost:15001/health"
 	@echo "  VNC:      http://localhost:15002"
 	@if [ -f .env ]; then . ./.env; fi; \
-	if [ -n "$${DEBUG_WEBHOOK_PATH:-}" ]; then \
+	if [ -n "$$(printf '%s' "$$DEBUG_WEBHOOK_PATH" | tr -d '[:space:]')" ]; then \
 		echo "  Debug:    http://localhost:15003/debug/webhook/$$DEBUG_WEBHOOK_PATH"; \
 	fi
 	@echo ""
