@@ -92,6 +92,12 @@ local-up: ## Start full stack locally (no TLS, direct port access)
 			export DEBUG_REPLICAS=$${DEBUG_REPLICAS:-1}; \
 		fi; \
 		if [ -n "$$(printf '%s' "$${IBKR_FLEX_QUERY_ID_2:-}" | tr -d '[:space:]')" ]; then \
+			flex_token_2="$$(printf '%s' "$${IBKR_FLEX_TOKEN_2:-}" | tr -d '[:space:]')"; \
+			flex_token_primary="$$(printf '%s' "$${IBKR_FLEX_TOKEN:-}" | tr -d '[:space:]')"; \
+			if [ -z "$$flex_token_2" ] && [ -z "$$flex_token_primary" ]; then \
+				echo "Error: IBKR_FLEX_QUERY_ID_2 is set, but poller-2 also requires IBKR_FLEX_TOKEN_2 or IBKR_FLEX_TOKEN." >&2; \
+				exit 1; \
+			fi; \
 			export COMPOSE_PROFILES="$${COMPOSE_PROFILES:+$$COMPOSE_PROFILES,}poller2"; \
 		fi; \
 	fi && \
