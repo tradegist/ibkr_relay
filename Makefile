@@ -91,6 +91,9 @@ local-up: ## Start full stack locally (no TLS, direct port access)
 		if [ -n "$$(printf '%s' "$$debug_webhook_path" | tr -d '[:space:]')" ]; then \
 			export DEBUG_REPLICAS=$${DEBUG_REPLICAS:-1}; \
 		fi; \
+		if [ -n "$$(printf '%s' "$${IBKR_FLEX_QUERY_ID_2:-}" | tr -d '[:space:]')" ]; then \
+			export COMPOSE_PROFILES="$${COMPOSE_PROFILES:+$$COMPOSE_PROFILES,}poller2"; \
+		fi; \
 	fi && \
 	$(LOCAL_COMPOSE) up -d --build
 	@echo ""

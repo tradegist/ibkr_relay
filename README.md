@@ -232,25 +232,25 @@ Types are auto-generated from the Pydantic models via `make types`. The `Trade` 
 
 All configuration is via environment variables in `.env`:
 
-| Variable                     | Required | Default         | Description                                                                                                     |
-| ---------------------------- | -------- | --------------- | --------------------------------------------------------------------------------------------------------------- |
-| `DEPLOY_MODE`                | Yes      | —               | `standalone` (own droplet via Terraform) or `shared` (deploy to existing droplet)                               |
-| `DO_API_TOKEN`               | Yes*     | —               | DigitalOcean API token (standalone mode only — can be removed after first deploy)                               |
-| `DROPLET_IP`                 | Yes*     | —               | Droplet IP (from Terraform output in standalone; provided by host in shared)                                    |
+| Variable                     | Required | Default             | Description                                                                                                     |
+| ---------------------------- | -------- | ------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `DEPLOY_MODE`                | Yes      | —                   | `standalone` (own droplet via Terraform) or `shared` (deploy to existing droplet)                               |
+| `DO_API_TOKEN`               | Yes\*    | —                   | DigitalOcean API token (standalone mode only — can be removed after first deploy)                               |
+| `DROPLET_IP`                 | Yes\*    | —                   | Droplet IP (from Terraform output in standalone; provided by host in shared)                                    |
 | `SSH_KEY`                    | No       | `~/.ssh/ibkr-relay` | SSH key path — **shared mode only**. In standalone, Terraform auto-generates and saves the key; never set this. |
-| `SITE_DOMAIN`                | Yes      | —               | Domain for the poller API (see [Domains & HTTPS](#domains--https))                                              |
-| `API_TOKEN`                  | Yes      | —               | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)                                                   |
-| `IBKR_FLEX_TOKEN`            | Yes      | —               | Flex Web Service token (from Client Portal)                                                                     |
-| `IBKR_FLEX_QUERY_ID`         | Yes      | —               | Flex Query ID (Trade Confirmation or Activity)                                                                  |
-| `TARGET_WEBHOOK_URL`         | No       | —               | Webhook endpoint (empty = log-only dry-run)                                                                     |
-| `WEBHOOK_SECRET`             | No       | —               | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                            |
-| `NOTIFIERS`                  | No       | —               | Active notification backends (e.g. `webhook`). Empty = dry-run                                                  |
-| `POLLER_ENABLED`             | No       | `true`          | Set to `false` to disable the poller container entirely                                                         |
-| `DROPLET_SIZE`               | No       | `s-1vcpu-512mb` | Override droplet size slug (e.g. `s-1vcpu-1gb`)                                                                 |
-| `POLL_INTERVAL_SECONDS`      | No       | `600`           | Flex poll interval (seconds)                                                                                    |
-| `DEBUG_WEBHOOK_PATH`         | No       | —               | Route webhooks to debug inbox instead of `TARGET_WEBHOOK_URL` (see [Debug Webhook Inbox](#debug-webhook-inbox)) |
-| `MAX_DEBUG_WEBHOOK_PAYLOADS` | No       | `100`           | Max payloads stored in the debug inbox (hard max: 150, FIFO eviction)                                           |
-| `DEBUG_LOG_LEVEL`            | No       | `INFO`          | Set to `DEBUG` to include full payload+headers in `docker logs ibkr-debug`                                      |
+| `SITE_DOMAIN`                | Yes      | —                   | Domain for the poller API (see [Domains & HTTPS](#domains--https))                                              |
+| `API_TOKEN`                  | Yes      | —                   | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)                                                   |
+| `IBKR_FLEX_TOKEN`            | Yes      | —                   | Flex Web Service token (from Client Portal)                                                                     |
+| `IBKR_FLEX_QUERY_ID`         | Yes      | —                   | Flex Query ID (Trade Confirmation or Activity)                                                                  |
+| `TARGET_WEBHOOK_URL`         | No       | —                   | Webhook endpoint (empty = log-only dry-run)                                                                     |
+| `WEBHOOK_SECRET`             | No       | —                   | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                            |
+| `NOTIFIERS`                  | No       | —                   | Active notification backends (e.g. `webhook`). Empty = dry-run                                                  |
+| `POLLER_ENABLED`             | No       | `true`              | Set to `false` to disable the poller container entirely                                                         |
+| `DROPLET_SIZE`               | No       | `s-1vcpu-512mb`     | Override droplet size slug (e.g. `s-1vcpu-1gb`)                                                                 |
+| `POLL_INTERVAL_SECONDS`      | No       | `600`               | Flex poll interval (seconds)                                                                                    |
+| `DEBUG_WEBHOOK_PATH`         | No       | —                   | Route webhooks to debug inbox instead of `TARGET_WEBHOOK_URL` (see [Debug Webhook Inbox](#debug-webhook-inbox)) |
+| `MAX_DEBUG_WEBHOOK_PAYLOADS` | No       | `100`               | Max payloads stored in the debug inbox (hard max: 150, FIFO eviction)                                           |
+| `DEBUG_LOG_LEVEL`            | No       | `INFO`              | Set to `DEBUG` to include full payload+headers in `docker logs ibkr-debug`                                      |
 
 **Second poller (optional):** Set `IBKR_FLEX_QUERY_ID_2` to enable a second independent poller with its own webhook destination. `IBKR_FLEX_TOKEN_2` is optional — when omitted, the primary `IBKR_FLEX_TOKEN` is used (useful when both queries share the same token). All `_2` suffixed env vars (`NOTIFIERS_2`, `TARGET_WEBHOOK_URL_2`, `WEBHOOK_SECRET_2`, `POLL_INTERVAL_SECONDS_2`, etc.) follow the same pattern.
 | `TIME_ZONE` | No | `America/New_York` | Timezone (tz database format) |
