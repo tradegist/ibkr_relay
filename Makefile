@@ -49,8 +49,15 @@ pause: ## Snapshot droplet + delete (save costs)
 resume: ## Restore droplet from snapshot
 	$(PYTHON) -m cli resume
 
-sync: ## Push .env + restart (S=gateway B=1 LOCAL_FILES=1 SKIP_E2E=1)
-	$(PYTHON) -m cli sync $(S) $(if $(LOCAL_FILES),--local-files) $(if $(B),--build) $(if $(SKIP_E2E),--skip-e2e)
+sync: ## Push .env + restart (S=gateway B=1 LOCAL_FILES=1 SKIP_E2E=1 ENV=local)
+	@. ./.env 2>/dev/null; \
+	env="$${RELAY_ENV:-$${DEFAULT_CLI_RELAY_ENV:-prod}}"; \
+	[ -n "$(ENV)" ] && env="$(ENV)"; \
+	if [ "$$env" = "local" ]; then \
+		$(LOCAL_COMPOSE) restart; \
+	else \
+		$(PYTHON) -m cli sync $(S) $(if $(LOCAL_FILES),--local-files) $(if $(B),--build) $(if $(SKIP_E2E),--skip-e2e); \
+	fi
 
 order: ## Place a stock order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE] [TIF=GTC] [RTH=1] [ENV=local])
 	@. ./.env && \
@@ -113,6 +120,10 @@ local-up: ## Start full stack locally (no TLS, direct port access)
 	@echo "  REST API: http://localhost:15000/health"
 	@echo "  Poller:   http://localhost:15001/health"
 	@echo "  VNC:      http://localhost:15002"
+	@if [ -f .env ]; then . ./.env; fi; \
+	if [ -n "$${DEBUG_WEBHOOK_PATH:-}" ]; then \
+		echo "  Debug:    http://localhost:15003/debug/webhook/$$DEBUG_WEBHOOK_PATH"; \
+	fi
 	@echo ""
 
 local-down: ## Stop local stack
@@ -188,9 +199,16 @@ e2e: ## Run E2E tests against local paper account (starts/stops stack)
 	if [ "$$was_up" = "false" ]; then $(MAKE) e2e-down; fi; \
 	exit $$ret
 
-logs: ## Stream poller logs (Ctrl+C to stop)
-	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
-		'cd /opt/$(PROJECT) && docker compose logs -f $(or $(S),poller)'
+logs: ## Stream logs (S=service ENV=local, default: poller on droplet)
+	@. ./.env && \
+	env="$${RELAY_ENV:-$${DEFAULT_CLI_RELAY_ENV:-prod}}"; \
+	[ -n "$(ENV)" ] && env="$(ENV)"; \
+	if [ "$$env" = "local" ]; then \
+		$(LOCAL_COMPOSE) logs -f $(or $(S),poller); \
+	else \
+		ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
+			'cd /opt/$(PROJECT) && docker compose logs -f $(or $(S),poller)'; \
+	fi
 
 stats: ## Show container resource usage
 	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \

@@ -1,4 +1,5 @@
 # Local development overrides — no TLS, direct port access.
+# Bind mounts shadow the baked-in COPY so code changes are visible on restart.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 
 services:
@@ -10,14 +11,33 @@ services:
   remote-client:
     ports:
       - "15000:5000"
+    volumes:
+      - ./services/remote-client/main.py:/app/main.py:ro
+      - ./services/remote-client/models_remote_client.py:/app/models_remote_client.py:ro
+      - ./services/remote-client/client:/app/client:ro
+      - ./services/remote-client/rc_routes:/app/rc_routes:ro
+      - ./services/poller/models_poller.py:/app/models_poller.py:ro
+      - ./services/notifier:/app/notifier:ro
+      - ./services/dedup:/app/dedup:ro
+      - ./services/shared:/app/shared:ro
 
   poller:
     ports:
       - "15001:8000"
+    volumes:
+      - ./services/poller/main.py:/app/main.py:ro
+      - ./services/poller/models_poller.py:/app/models_poller.py:ro
+      - ./services/poller/poller:/app/poller:ro
+      - ./services/poller/poller_routes:/app/poller_routes:ro
+      - ./services/notifier:/app/notifier:ro
+      - ./services/dedup:/app/dedup:ro
+      - ./services/shared:/app/shared:ro
 
   ibkr-debug:
     ports:
       - "15003:9000"
+    volumes:
+      - ./services/debug/debug_app.py:/app/debug_app.py:ro
 
   caddy:
     profiles: ["disabled"]
