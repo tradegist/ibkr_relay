@@ -25,7 +25,7 @@ import logging
 import xml.etree.ElementTree as ET
 from typing import Any
 
-from models_poller import BuySell, Fill
+from poller_models import BuySell, Fill
 from shared import normalize_asset_class, normalize_order_type
 
 log = logging.getLogger("flex_parser")

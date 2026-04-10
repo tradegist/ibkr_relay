@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dedup import get_processed_ids, mark_processed_batch
-from models_poller import BuySell, Fill, Trade, WebhookPayloadTrades
 from poller import (
     get_last_poll_ts,
     init_dedup_db,
@@ -16,6 +15,7 @@ from poller import (
     prune_old,
     set_last_poll_ts,
 )
+from poller_models import BuySell, Fill, Trade, WebhookPayloadTrades
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 

@@ -3,7 +3,7 @@
 from aiohttp import web
 
 from client import TRADING_MODE, IBClient
-from models_remote_client import HealthResponse
+from rc_models import HealthResponse
 
 
 async def handle_health(request: web.Request) -> web.Response:

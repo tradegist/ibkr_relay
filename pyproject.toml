@@ -62,5 +62,5 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = [
     "client", "rc_routes", "poller_routes", "poller", "notifier", "shared", "dedup", "debug",
-    "models_poller", "models_remote_client",
+    "poller_models", "rc_models",
 ]

@@ -4,7 +4,7 @@ Usage: python schema_gen.py <module>
 
 Reads the SCHEMA_MODELS list from the given module and writes a
 combined JSON Schema to stdout.  The .pth file in the venv ensures
-both models_poller and models_remote_client are importable.
+both poller_models and rc_models are importable.
 """
 
 import importlib

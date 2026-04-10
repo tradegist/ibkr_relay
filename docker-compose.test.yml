@@ -24,7 +24,7 @@ services:
       - ./services/notifier:/opt/notifier
       - ./services/dedup:/opt/dedup
       - ./services/shared:/opt/shared
-      - ./services/poller/models_poller.py:/opt/poller-models/models_poller.py:ro
+      - ./services/poller/poller_models.py:/opt/poller-models/poller_models.py:ro
     healthcheck:
       test:
         [

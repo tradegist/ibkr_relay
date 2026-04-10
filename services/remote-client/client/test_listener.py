@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from client.listener import ListenerNamespace, _fill_to_trade, _map_to_fill
-from models_poller import BuySell, Fill, WebhookPayloadTrades
+from poller_models import BuySell, Fill, WebhookPayloadTrades
 
 # ── Mock factories ───────────────────────────────────────────────────────
 

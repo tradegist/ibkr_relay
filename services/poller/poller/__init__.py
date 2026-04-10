@@ -11,9 +11,9 @@ import httpx
 
 from dedup import get_processed_ids, mark_processed_batch, prune
 from dedup import init_db as _init_dedup_db
-from models_poller import Trade, WebhookPayloadTrades
 from notifier import notify
 from notifier.base import BaseNotifier
+from poller_models import Trade, WebhookPayloadTrades
 from shared import aggregate_fills
 
 from .flex_parser import parse_fills

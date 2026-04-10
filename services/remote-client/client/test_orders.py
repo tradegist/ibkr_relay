@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from client.orders import OrdersNamespace
-from models_remote_client import ContractPayload, OrderPayload
+from rc_models import ContractPayload, OrderPayload
 
 
 def _make_namespace(

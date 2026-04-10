@@ -2,7 +2,7 @@
 
 from aiohttp import web
 
-from models_poller import HealthResponse
+from poller_models import HealthResponse
 
 
 async def handle_health(request: web.Request) -> web.Response:
