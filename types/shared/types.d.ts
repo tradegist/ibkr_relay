@@ -6,7 +6,9 @@
  */
 
 export type TypesSchema = WebhookPayloadTrades | Trade | Fill;
+export type AssetClass = "crypto" | "equity" | "forex" | "future" | "option" | "other";
 export type BuySell = "buy" | "sell";
+export type Source = "commissionReportEvent" | "execDetailsEvent" | "flex";
 
 /**
  * Webhook payload for trade execution events.
@@ -23,7 +25,7 @@ export interface WebhookPayloadTrades {
 export interface Trade {
   orderId: string;
   symbol: string;
-  assetClass: "equity" | "option" | "crypto" | "future" | "forex" | "other";
+  assetClass: AssetClass;
   side: BuySell;
   orderType?: ("market" | "limit" | "stop" | "stop_limit" | "trailing_stop") | null;
   price: number;
@@ -33,7 +35,7 @@ export interface Trade {
   fillCount: number;
   execIds: string[];
   timestamp: string;
-  source: "flex" | "execDetailsEvent" | "commissionReportEvent";
+  source: Source;
   raw: {
     [k: string]: unknown;
   };
@@ -45,7 +47,7 @@ export interface Fill {
   execId: string;
   orderId: string;
   symbol: string;
-  assetClass: "equity" | "option" | "crypto" | "future" | "forex" | "other";
+  assetClass: AssetClass;
   side: BuySell;
   orderType?: ("market" | "limit" | "stop" | "stop_limit" | "trailing_stop") | null;
   price: number;
@@ -53,7 +55,7 @@ export interface Fill {
   cost: number;
   fee: number;
   timestamp: string;
-  source: "flex" | "execDetailsEvent" | "commissionReportEvent";
+  source: Source;
   raw: {
     [k: string]: unknown;
   };

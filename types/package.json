@@ -1,7 +1,7 @@
 {
   "name": "@tradegist/ibkr-relay-types",
   "version": "0.2.0",
-  "description": "TypeScript types for IBKR Webhook Relay — webhook payloads and order placement",
+  "description": "TypeScript types for IBKR Webhook Relay — webhook payloads and poller API",
   "types": "index.d.ts",
   "files": [
     "index.d.ts",
