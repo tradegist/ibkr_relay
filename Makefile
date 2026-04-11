@@ -118,7 +118,7 @@ local-down: ## Stop local stack
 	$(LOCAL_COMPOSE) down
 
 e2e-up: ## Start E2E test stack (poller + ibkr-debug)
-	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — copy .env.test.example to .env.test and fill in credentials"; exit 1; }
+	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — run: cp .env.test.example .env.test (placeholder values are fine)"; exit 1; }
 	@if curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 		echo "Stack already running and connected"; \
 	else \
@@ -146,7 +146,7 @@ e2e-run: ## Run E2E tests (stack must be up)
 	$(PYTHON) -m pytest services/poller/tests/e2e/ -v
 
 e2e: ## Run E2E tests (starts/stops stack automatically)
-	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — copy .env.test.example to .env.test and fill in credentials"; exit 1; }
+	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — run: cp .env.test.example .env.test (placeholder values are fine)"; exit 1; }
 	@was_up=false; \
 	if curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 		was_up=true; \
