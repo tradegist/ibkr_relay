@@ -397,11 +397,8 @@ async def _listen(
         try:
             async with aiohttp.ClientSession() as session:
                 headers = {"Authorization": f"Bearer {api_token}"}
-                log.info(
-                    "Connecting to bridge WS: %s (last_seq=%d)",
-                    url,
-                    last_seq,
-                )
+                log.info("Connecting to bridge WS (last_seq=%d)", last_seq)
+                log.debug("Bridge WS URL: %s", url)
 
                 async with session.ws_connect(
                     url, headers=headers, heartbeat=30.0,
@@ -495,9 +492,10 @@ async def start_listener(
 ) -> None:
     """Start the WebSocket listener (runs indefinitely with auto-reconnect)."""
     log.info(
-        "Listener starting (ws_url=%s, exec_events=%s, debounce=%dms)",
-        cfg.ws_url, cfg.exec_events_enabled, cfg.debounce_ms,
+        "Listener starting (exec_events=%s, debounce=%dms)",
+        cfg.exec_events_enabled, cfg.debounce_ms,
     )
+    log.debug("Bridge WS URL: %s", cfg.ws_url)
 
     await _listen(
         ws_url=cfg.ws_url,
