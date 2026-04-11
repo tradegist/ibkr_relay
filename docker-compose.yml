@@ -17,61 +17,49 @@ services:
       - caddy-data:/data
       - caddy-config:/config
 
-  poller:
+  relays:
     build:
       context: .
-      dockerfile: services/poller/Dockerfile
+      dockerfile: services/relay_core/Dockerfile
     restart: always
-    deploy:
-      replicas: ${POLLER_REPLICAS:-1}
     environment:
-      IBKR_FLEX_TOKEN: ${IBKR_FLEX_TOKEN:?Set IBKR_FLEX_TOKEN in .env}
-      IBKR_FLEX_QUERY_ID: ${IBKR_FLEX_QUERY_ID:?Set IBKR_FLEX_QUERY_ID in .env}
+      RELAYS: ${RELAYS:?Set RELAYS in .env (e.g. ibkr)}
+      API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
+      # Generic (relay-agnostic) env vars — adapters use {RELAY}_VAR overrides
       NOTIFIERS: ${NOTIFIERS:-}
       TARGET_WEBHOOK_URL: ${TARGET_WEBHOOK_URL:-}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       WEBHOOK_HEADER_NAME: ${WEBHOOK_HEADER_NAME:-}
       WEBHOOK_HEADER_VALUE: ${WEBHOOK_HEADER_VALUE:-}
       DEBUG_WEBHOOK_PATH: ${DEBUG_WEBHOOK_PATH:-}
-      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-600}
-      API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
-      META_DB_PATH: /data/meta/poller.db
+      POLL_INTERVAL: ${POLL_INTERVAL:-600}
       LISTENER_ENABLED: ${LISTENER_ENABLED:-}
-      LISTENER_EXEC_EVENTS_ENABLED: ${LISTENER_EXEC_EVENTS_ENABLED:-false}
-      LISTENER_EVENT_DEBOUNCE_TIME: ${LISTENER_EVENT_DEBOUNCE_TIME:-0}
+      LISTENER_DEBOUNCE_MS: ${LISTENER_DEBOUNCE_MS:-0}
+      # IBKR-specific env vars
+      IBKR_FLEX_TOKEN: ${IBKR_FLEX_TOKEN:-}
+      IBKR_FLEX_QUERY_ID: ${IBKR_FLEX_QUERY_ID:-}
+      IBKR_FLEX_TOKEN_2: ${IBKR_FLEX_TOKEN_2:-}
+      IBKR_FLEX_QUERY_ID_2: ${IBKR_FLEX_QUERY_ID_2:-}
+      IBKR_NOTIFIERS: ${IBKR_NOTIFIERS:-}
+      IBKR_TARGET_WEBHOOK_URL: ${IBKR_TARGET_WEBHOOK_URL:-}
+      IBKR_WEBHOOK_SECRET: ${IBKR_WEBHOOK_SECRET:-}
+      IBKR_WEBHOOK_HEADER_NAME: ${IBKR_WEBHOOK_HEADER_NAME:-}
+      IBKR_WEBHOOK_HEADER_VALUE: ${IBKR_WEBHOOK_HEADER_VALUE:-}
+      IBKR_TARGET_WEBHOOK_URL_2: ${IBKR_TARGET_WEBHOOK_URL_2:-}
+      IBKR_WEBHOOK_SECRET_2: ${IBKR_WEBHOOK_SECRET_2:-}
+      IBKR_WEBHOOK_HEADER_NAME_2: ${IBKR_WEBHOOK_HEADER_NAME_2:-}
+      IBKR_WEBHOOK_HEADER_VALUE_2: ${IBKR_WEBHOOK_HEADER_VALUE_2:-}
+      IBKR_POLL_INTERVAL: ${IBKR_POLL_INTERVAL:-}
+      IBKR_LISTENER_ENABLED: ${IBKR_LISTENER_ENABLED:-}
+      IBKR_LISTENER_DEBOUNCE_MS: ${IBKR_LISTENER_DEBOUNCE_MS:-}
       BRIDGE_WS_URL: ${BRIDGE_WS_URL:-}
       BRIDGE_API_TOKEN: ${BRIDGE_API_TOKEN:-}
+      LISTENER_EXEC_EVENTS_ENABLED: ${LISTENER_EXEC_EVENTS_ENABLED:-false}
     expose:
       - "8000"
     volumes:
       - dedup-data:/data/dedup
-      - poller-data:/data/meta
-
-  poller-2:
-    build:
-      context: .
-      dockerfile: services/poller/Dockerfile
-    restart: always
-    profiles: ["poller2"]
-    deploy:
-      replicas: ${POLLER_REPLICAS:-1}
-    environment:
-      IBKR_FLEX_TOKEN: ${IBKR_FLEX_TOKEN_2:-${IBKR_FLEX_TOKEN}}
-      IBKR_FLEX_QUERY_ID: ${IBKR_FLEX_QUERY_ID_2:?Set IBKR_FLEX_QUERY_ID_2 in .env}
-      NOTIFIERS: ${NOTIFIERS_2:-}
-      TARGET_WEBHOOK_URL: ${TARGET_WEBHOOK_URL_2:-}
-      WEBHOOK_SECRET: ${WEBHOOK_SECRET_2:-}
-      WEBHOOK_HEADER_NAME: ${WEBHOOK_HEADER_NAME_2:-}
-      WEBHOOK_HEADER_VALUE: ${WEBHOOK_HEADER_VALUE_2:-}
-      DEBUG_WEBHOOK_PATH: ${DEBUG_WEBHOOK_PATH:-}
-      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS_2:-600}
-      API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
-      META_DB_PATH: /data/meta/poller-2.db
-    expose:
-      - "8000"
-    volumes:
-      - dedup-data:/data/dedup
-      - poller-2-data:/data/meta
+      - relay-meta:/data/meta
 
   ibkr-debug:
     build:
@@ -93,8 +81,7 @@ services:
 
 volumes:
   dedup-data:
-  poller-data:
-  poller-2-data:
+  relay-meta:
   caddy-data:
   caddy-config:
 

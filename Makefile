@@ -8,17 +8,6 @@ E2E_COMPOSE_DOWN = docker compose -f docker-compose.yml -f docker-compose.test.y
 LOCAL_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.local.yml
 CLI_RELAY_ENV = $(if $(ENV),RELAY_ENV=$(ENV))
 
-# Service toggle via deploy.replicas (requires Docker Compose v2, the Go rewrite).
-# Compose v2 honours deploy.replicas WITHOUT Swarm — setting replicas to 0 prevents
-# the container from being created. See: https://docs.docker.com/reference/compose-file/deploy/
-# Allow disabling poller: make local-up POLLER=0  or  make sync POLLER=0
-ifdef POLLER
-  ifneq ($(filter $(POLLER),0 1),$(POLLER))
-    $(error POLLER must be 0 or 1 (got: $(POLLER)))
-  endif
-  export POLLER_REPLICAS := $(POLLER)
-endif
-
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
 
@@ -28,6 +17,7 @@ setup: ## Create .venv and install all dependencies
 	@echo "$(CURDIR)/services/poller" > $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 	@echo "$(CURDIR)/services/debug" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 	@echo "$(CURDIR)/services" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
+	@echo "$(CURDIR)/services/relay_core" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 
 deploy: ## Deploy infrastructure (Terraform + Docker)
 	$(PYTHON) -m cli deploy
@@ -91,31 +81,15 @@ lint: ## Run ruff linter (use FIX=1 to auto-fix)
 local-up: ## Start full stack locally (no TLS, direct port access)
 	@if [ -f .env ]; then \
 		. ./.env; \
-		pe="$${POLLER_ENABLED:-true}"; \
-		if [ "$$pe" = "false" ] || [ "$$pe" = "0" ] || [ "$$pe" = "no" ] || [ -z "$$pe" ]; then \
-			export POLLER_REPLICAS=$${POLLER_REPLICAS:-0}; \
-		fi; \
 		debug_webhook_path="$${DEBUG_WEBHOOK_PATH:-}"; \
 		if [ -n "$$(printf '%s' "$$debug_webhook_path" | tr -d '[:space:]')" ]; then \
 			export DEBUG_REPLICAS=$${DEBUG_REPLICAS:-1}; \
 		fi; \
-		if [ -n "$$(printf '%s' "$${IBKR_FLEX_QUERY_ID_2:-}" | tr -d '[:space:]')" ]; then \
-			flex_token_2="$$(printf '%s' "$${IBKR_FLEX_TOKEN_2:-}" | tr -d '[:space:]')"; \
-			flex_token_primary="$$(printf '%s' "$${IBKR_FLEX_TOKEN:-}" | tr -d '[:space:]')"; \
-			if [ -z "$$flex_token_2" ] && [ -z "$$flex_token_primary" ]; then \
-				echo "Error: IBKR_FLEX_QUERY_ID_2 is set, but poller-2 also requires IBKR_FLEX_TOKEN_2 or IBKR_FLEX_TOKEN." >&2; \
-				exit 1; \
-			fi; \
-			export COMPOSE_PROFILES="$${COMPOSE_PROFILES:+$$COMPOSE_PROFILES,}poller2"; \
-		fi; \
 	fi && \
 	$(LOCAL_COMPOSE) up -d --build
 	@echo ""
-	@echo "  Poller:   http://localhost:15001/health"
+	@echo "  Relays:   http://localhost:15001/health"
 	@if [ -f .env ]; then . ./.env; fi; \
-	if [ -n "$$IBKR_FLEX_QUERY_ID_2" ]; then \
-		echo "  Poller-2: http://localhost:15002/health"; \
-	fi; \
 	if [ -n "$$(printf '%s' "$$DEBUG_WEBHOOK_PATH" | tr -d '[:space:]')" ]; then \
 		echo "  Debug:    http://localhost:15003/debug/webhook/$$DEBUG_WEBHOOK_PATH"; \
 	fi
@@ -124,23 +98,23 @@ local-up: ## Start full stack locally (no TLS, direct port access)
 local-down: ## Stop local stack
 	$(LOCAL_COMPOSE) down
 
-e2e-up: ## Start E2E test stack (poller + ibkr-debug)
+e2e-up: ## Start E2E test stack (relays + ibkr-debug)
 	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — run: cp .env.test.example .env.test (placeholder values are fine)"; exit 1; }
 	@if curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 		echo "Stack already running and connected"; \
 	else \
 		$(E2E_COMPOSE) up -d --build; \
-		echo "Waiting for poller..."; \
-		poller_ready=false; \
+		echo "Waiting for relays..."; \
+		relays_ready=false; \
 		for i in $$(seq 1 10); do \
 			if curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
-				poller_ready=true; \
-				echo "poller ready"; break; \
+				relays_ready=true; \
+				echo "relays ready"; break; \
 			fi; \
 			sleep 3; \
 		done; \
-		if [ "$$poller_ready" != "true" ]; then \
-			echo "ERROR: poller did not become healthy within 30s"; \
+		if [ "$$relays_ready" != "true" ]; then \
+			echo "ERROR: relays did not become healthy within 30s"; \
 			exit 1; \
 		fi; \
 	fi
@@ -149,7 +123,7 @@ e2e-down: ## Stop and remove E2E test stack
 	$(E2E_COMPOSE_DOWN) down
 
 e2e-run: ## Run E2E tests (stack must be up)
-	@$(E2E_COMPOSE) restart poller ibkr-debug > /dev/null 2>&1 && sleep 3
+	@$(E2E_COMPOSE) restart relays ibkr-debug > /dev/null 2>&1 && sleep 3
 	$(PYTHON) -m pytest services/poller/tests/e2e/ services/listener/tests/e2e/ -v
 
 e2e: ## Run E2E tests (starts/stops stack automatically)
@@ -167,10 +141,10 @@ logs: ## Stream logs (S=service ENV=local, default: poller on droplet)
 	env="$${RELAY_ENV:-$${DEFAULT_CLI_RELAY_ENV:-prod}}"; \
 	[ -n "$(ENV)" ] && env="$(ENV)"; \
 	if [ "$$env" = "local" ]; then \
-		$(LOCAL_COMPOSE) logs -f $(or $(S),poller); \
+		$(LOCAL_COMPOSE) logs -f $(or $(S),relays); \
 	else \
 		ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
-			'cd /opt/$(PROJECT) && docker compose logs -f $(or $(S),poller)'; \
+			'cd /opt/$(PROJECT) && docker compose logs -f $(or $(S),relays)'; \
 	fi
 
 stats: ## Show container resource usage
