@@ -706,7 +706,7 @@ Add the following to `.env`:
 
 ```env
 LISTENER_ENABLED=true
-BRIDGE_WS_URL=ws://bridge:5000/ibkr/ws/events   # same-droplet
+BRIDGE_WS_URL=ws://bridge:5000/ibkr/ws/events   # container-to-container (same Docker network)
 # BRIDGE_WS_URL=wss://trade.example.com/ibkr/ws/events  # cross-droplet (TLS)
 BRIDGE_API_TOKEN=your_bridge_api_token            # must match bridge's API_TOKEN
 ```
