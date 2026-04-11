@@ -14,9 +14,8 @@ def run(args):
 
     if poller == "2":
         if not validate_poller_env("_2"):
-            die("Poller 2 is not configured. Set IBKR_FLEX_TOKEN_2, "
-                "IBKR_FLEX_QUERY_ID_2, TARGET_WEBHOOK_URL_2, and "
-                "WEBHOOK_SECRET_2 in .env")
+            die("Poller 2 is not configured. Set IBKR_FLEX_QUERY_ID_2 "
+                "(and optionally IBKR_FLEX_TOKEN_2) in .env")
         endpoint = "/ibkr/poller/2/run"
         service = "poller-2"
     else:

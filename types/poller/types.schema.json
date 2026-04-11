@@ -19,15 +19,7 @@
           "type": "string"
         },
         "assetClass": {
-          "enum": [
-            "equity",
-            "option",
-            "crypto",
-            "future",
-            "forex",
-            "other"
-          ],
-          "type": "string"
+          "$ref": "#/$defs/AssetClass"
         },
         "side": {
           "$ref": "#/$defs/BuySell"
@@ -35,14 +27,7 @@
         "orderType": {
           "anyOf": [
             {
-              "enum": [
-                "market",
-                "limit",
-                "stop",
-                "stop_limit",
-                "trailing_stop"
-              ],
-              "type": "string"
+              "$ref": "#/$defs/OrderType"
             },
             {
               "type": "null"
@@ -75,12 +60,7 @@
           "type": "string"
         },
         "source": {
-          "enum": [
-            "flex",
-            "execDetailsEvent",
-            "commissionReportEvent"
-          ],
-          "type": "string"
+          "$ref": "#/$defs/Source"
         },
         "raw": {
           "additionalProperties": true,
@@ -133,6 +113,35 @@
       ],
       "title": "HealthResponse",
       "type": "object"
+    },
+    "AssetClass": {
+      "enum": [
+        "crypto",
+        "equity",
+        "forex",
+        "future",
+        "option",
+        "other"
+      ],
+      "type": "string"
+    },
+    "OrderType": {
+      "enum": [
+        "limit",
+        "market",
+        "stop",
+        "stop_limit",
+        "trailing_stop"
+      ],
+      "type": "string"
+    },
+    "Source": {
+      "enum": [
+        "commissionReportEvent",
+        "execDetailsEvent",
+        "flex"
+      ],
+      "type": "string"
     }
   },
   "anyOf": [

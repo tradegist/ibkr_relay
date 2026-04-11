@@ -3,27 +3,21 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 
 services:
-  novnc:
-    platform: linux/amd64
+  poller:
     ports:
-      - "15002:8080"
-
-  remote-client:
-    ports:
-      - "15000:5000"
+      - "15001:8000"
     volumes:
-      - ./services/remote-client/main.py:/app/main.py:ro
-      - ./services/remote-client/rc_models.py:/app/rc_models.py:ro
-      - ./services/remote-client/client:/app/client:ro
-      - ./services/remote-client/rc_routes:/app/rc_routes:ro
+      - ./services/poller/main.py:/app/main.py:ro
       - ./services/poller/poller_models.py:/app/poller_models.py:ro
+      - ./services/poller/poller:/app/poller:ro
+      - ./services/poller/poller_routes:/app/poller_routes:ro
       - ./services/notifier:/app/notifier:ro
       - ./services/dedup:/app/dedup:ro
       - ./services/shared:/app/shared:ro
 
-  poller:
+  poller-2:
     ports:
-      - "15001:8000"
+      - "15002:8000"
     volumes:
       - ./services/poller/main.py:/app/main.py:ro
       - ./services/poller/poller_models.py:/app/poller_models.py:ro
@@ -41,3 +35,7 @@ services:
 
   caddy:
     profiles: ["disabled"]
+
+networks:
+  default:
+    name: ibkr-relay-local

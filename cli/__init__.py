@@ -1,7 +1,7 @@
 """IBKR Webhook Relay CLI — project-specific configuration.
 
 Sets up CoreConfig and exposes IBKR-specific helpers used by
-project-specific commands (order, poll, test_webhook).
+project-specific commands (poll, test_webhook).
 """
 
 import json
@@ -21,19 +21,40 @@ REMOTE_DIR = f"/opt/{PROJECT_NAME}"
 # ── IBKR-specific helpers ───────────────────────────────────────────
 
 def validate_poller_env(suffix=""):
+    """Check that poller env vars are set for the given suffix.
+
+    For the primary poller (suffix=""), both IBKR_FLEX_TOKEN and
+    IBKR_FLEX_QUERY_ID are required.
+
+    For poller-2 (suffix="_2"), only IBKR_FLEX_QUERY_ID_2 is required.
+    IBKR_FLEX_TOKEN_2 is optional — when absent, the primary
+    IBKR_FLEX_TOKEN is used (allows two queries under one token).
+    """
+    if suffix:
+        # Poller-2: only the query ID is required
+        query_id = os.environ.get(f"IBKR_FLEX_QUERY_ID{suffix}", "").strip()
+        if not query_id:
+            return False
+        # If a dedicated token isn't set, the primary token must exist
+        token_2 = os.environ.get(f"IBKR_FLEX_TOKEN{suffix}", "").strip()
+        token_1 = os.environ.get("IBKR_FLEX_TOKEN", "").strip()
+        if not token_2 and not token_1:
+            die(f"Poller{suffix} has IBKR_FLEX_QUERY_ID{suffix} but "
+                f"neither IBKR_FLEX_TOKEN{suffix} nor IBKR_FLEX_TOKEN is set")
+        return True
+
     required = ["IBKR_FLEX_TOKEN", "IBKR_FLEX_QUERY_ID"]
     missing = []
     set_count = 0
     for var in required:
-        full = f"{var}{suffix}"
-        if os.environ.get(full):
+        if os.environ.get(var, "").strip():
             set_count += 1
         else:
-            missing.append(full)
+            missing.append(var)
     if set_count == 0:
         return False
     if missing:
-        die(f"Poller{suffix or ''} partially configured. Missing: {', '.join(missing)}")
+        die(f"Poller partially configured. Missing: {', '.join(missing)}")
     return True
 
 
@@ -58,27 +79,6 @@ def _compose_env():
         if poller_enabled.lower() in ("false", "0", "no", ""):
             env_vars["POLLER_REPLICAS"] = "0"
 
-    # GATEWAY_REPLICAS from Makefile (make sync REMOTE_CLIENT=0) takes precedence
-    gw_replicas = os.environ.get("GATEWAY_REPLICAS")
-    if gw_replicas is not None:
-        if gw_replicas not in ("0", "1"):
-            die(f"GATEWAY_REPLICAS must be 0 or 1 (got: {gw_replicas})")
-        env_vars["GATEWAY_REPLICAS"] = gw_replicas
-    else:
-        rc_enabled = os.environ.get("REMOTE_CLIENT_ENABLED", "true")
-        if rc_enabled.lower() in ("false", "0", "no", ""):
-            env_vars["GATEWAY_REPLICAS"] = "0"
-
-    # Warn if listener is enabled but gateway stack is disabled
-    if env_vars.get("GATEWAY_REPLICAS") == "0":
-        listener = os.environ.get("LISTENER_ENABLED", "")
-        if listener and listener.lower() not in ("false", "0", "no"):
-            print(
-                "WARNING: LISTENER_ENABLED is set but REMOTE_CLIENT_ENABLED=false "
-                "— the listener requires the remote-client service",
-                file=sys.stderr,
-            )
-
     # DEBUG_REPLICAS: auto-enable debug service when DEBUG_WEBHOOK_PATH is set
     if os.environ.get("DEBUG_WEBHOOK_PATH", "").strip():
         env_vars["DEBUG_REPLICAS"] = "1"
@@ -90,15 +90,8 @@ def _droplet_size():
     override = os.environ.get("DROPLET_SIZE", "")
     if override:
         return override
-    heap = int(env("JAVA_HEAP_SIZE", "768"))
-    if heap <= 1024:
-        return "s-1vcpu-2gb"
-    elif heap <= 3072:
-        return "s-2vcpu-4gb"
-    elif heap <= 6144:
-        return "s-4vcpu-8gb"
-    else:
-        return "s-8vcpu-16gb"
+    # Poller-only needs minimal resources
+    return "s-1vcpu-512mb"
 
 
 def _pre_sync_hook():
@@ -106,25 +99,31 @@ def _pre_sync_hook():
     from notifier import validate_notifier_env
     validate_notifier_env()
     validate_notifier_env("_2")
-    # Validate gateway env vars when gateway stack is enabled
-    # (replaces compose :? validation removed for poller-only deploys)
-    env_vars = _compose_env()
-    if env_vars.get("GATEWAY_REPLICAS") != "0":
-        missing = [v for v in ("TWS_USERID", "TWS_PASSWORD", "VNC_SERVER_PASSWORD")
-                   if not os.environ.get(v)]
-        if missing:
-            die(f"Gateway is enabled but missing: {', '.join(missing)}")
 
 
 _RELAY_URLS: dict[str, str] = {
-    "local": "http://localhost:15000",
+    "local": "http://localhost:15001",
 }
+
+# Local-mode routing: Caddy is disabled, so we replicate its path-based
+# routing (poller-2 on a separate port with path rewrite).
+_LOCAL_ROUTE_OVERRIDES: list[tuple[str, str, str]] = [
+    # (path_prefix, base_url, rewrite_from → rewrite_to)
+    ("/ibkr/poller/2/", "http://localhost:15002", "/ibkr/poller/2"),
+]
 
 
 def relay_api(path, method="POST", data=None):
     relay_env = os.environ.get("RELAY_ENV") or os.environ.get("DEFAULT_CLI_RELAY_ENV") or "prod"
     base_url = _RELAY_URLS.get(relay_env)
     if base_url:
+        if relay_env == "local":
+            # Caddy is disabled locally, so replicate its path-based routing
+            for prefix, override_url, rewrite_prefix in _LOCAL_ROUTE_OVERRIDES:
+                if path.startswith(prefix):
+                    path = path.replace(rewrite_prefix, "/ibkr/poller", 1)
+                    base_url = override_url
+                    break
         url = f"{base_url}{path}"
     else:
         domain = env("SITE_DOMAIN")
@@ -153,31 +152,22 @@ _CONFIG = CoreConfig(
     project_dir=PROJECT_DIR,
     terraform_vars={
         "do_token": "DO_API_TOKEN",
-        "java_heap_size": "JAVA_HEAP_SIZE",
         "droplet_size": "DROPLET_SIZE",
-        "vnc_domain": "VNC_DOMAIN",
         "site_domain": "SITE_DOMAIN",
     },
     required_env=[
-        "DO_API_TOKEN", "TWS_USERID", "TWS_PASSWORD",
-        "VNC_SERVER_PASSWORD",
+        "DO_API_TOKEN",
         "IBKR_FLEX_TOKEN", "IBKR_FLEX_QUERY_ID",
         "API_TOKEN",
     ],
     service_map={
-        "gateway": "ib-gateway",
-        "ib-gateway": "ib-gateway",
-        "novnc": "novnc",
-        "vnc": "novnc",
         "caddy": "caddy",
-        "relay": "remote-client",
-        "remote-client": "remote-client",
         "poller": "poller",
         "poller2": "poller-2",
         "poller-2": "poller-2",
+        "debug": "ibkr-debug",
+        "ibkr-debug": "ibkr-debug",
     },
-    post_deploy_message="Open the VNC URL and complete 2FA",
-    post_resume_message="Open https://{VNC_DOMAIN} to complete 2FA",
     compose_profiles_fn=_compose_profiles,
     compose_env_fn=_compose_env,
     size_selector_fn=_droplet_size,
@@ -186,3 +176,4 @@ _CONFIG = CoreConfig(
 )
 
 set_config(_CONFIG)
+

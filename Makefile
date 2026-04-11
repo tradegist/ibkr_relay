@@ -1,9 +1,10 @@
-.PHONY: setup deploy destroy pause resume sync order poll poll2 test-webhook types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats gateway ssh help
+.PHONY: setup deploy destroy pause resume sync poll poll2 test-webhook types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats ssh help
 
 PROJECT = ibkr-relay
 PYTHON ?= .venv/bin/python3
 E2E_ENV = .env.test
 E2E_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.test.yml -p $(PROJECT)-test --env-file $(E2E_ENV)
+E2E_COMPOSE_DOWN = docker compose -f docker-compose.yml -f docker-compose.test.yml -p $(PROJECT)-test
 LOCAL_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.local.yml
 CLI_RELAY_ENV = $(if $(ENV),RELAY_ENV=$(ENV))
 
@@ -18,22 +19,13 @@ ifdef POLLER
   export POLLER_REPLICAS := $(POLLER)
 endif
 
-# Allow disabling gateway stack: make local-up REMOTE_CLIENT=0  or  make sync REMOTE_CLIENT=0
-ifdef REMOTE_CLIENT
-  ifneq ($(filter $(REMOTE_CLIENT),0 1),$(REMOTE_CLIENT))
-    $(error REMOTE_CLIENT must be 0 or 1 (got: $(REMOTE_CLIENT)))
-  endif
-  export GATEWAY_REPLICAS := $(REMOTE_CLIENT)
-endif
-
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
 
 setup: ## Create .venv and install all dependencies
 	@test -d .venv || python3 -m venv .venv
-	.venv/bin/pip install -r requirements-dev.txt -r services/poller/requirements.txt -r services/remote-client/requirements.txt
+	.venv/bin/pip install -r requirements-dev.txt -r services/poller/requirements.txt
 	@echo "$(CURDIR)/services/poller" > $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
-	@echo "$(CURDIR)/services/remote-client" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 	@echo "$(CURDIR)/services/debug" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 	@echo "$(CURDIR)/services" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 
@@ -49,7 +41,7 @@ pause: ## Snapshot droplet + delete (save costs)
 resume: ## Restore droplet from snapshot
 	$(PYTHON) -m cli resume
 
-sync: ## Push .env + restart (S=gateway B=1 LOCAL_FILES=1 SKIP_E2E=1 ENV=local)
+sync: ## Push .env + restart (S=service B=1 LOCAL_FILES=1 SKIP_E2E=1 ENV=local)
 	@. ./.env 2>/dev/null; \
 	env="$${RELAY_ENV:-$${DEFAULT_CLI_RELAY_ENV:-prod}}"; \
 	[ -n "$(ENV)" ] && env="$(ENV)"; \
@@ -58,14 +50,6 @@ sync: ## Push .env + restart (S=gateway B=1 LOCAL_FILES=1 SKIP_E2E=1 ENV=local)
 	else \
 		$(PYTHON) -m cli sync $(S) $(if $(LOCAL_FILES),--local-files) $(if $(B),--build) $(if $(SKIP_E2E),--skip-e2e); \
 	fi
-
-order: ## Place a stock order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE] [TIF=GTC] [RTH=1] [ENV=local])
-	@. ./.env && \
-		rc="$${REMOTE_CLIENT_ENABLED:-true}"; \
-		if [ "$$rc" = "false" ] || [ "$$rc" = "0" ] || [ "$$rc" = "no" ] || [ -z "$$rc" ]; then \
-			echo "ERROR: REMOTE_CLIENT_ENABLED is false — order API requires the gateway stack" >&2; exit 1; \
-		fi
-	$(CLI_RELAY_ENV) $(PYTHON) -m cli order $(Q) $(SYM) $(T) $(P) $(CUR) $(EX) $(if $(TIF),--tif $(TIF)) $(if $(RTH),--outside-rth)
 
 poll: ## Trigger an immediate Flex poll (V=1 verbose, DEBUG=1 raw XML, REPLAY=N resend, ENV=local)
 	$(CLI_RELAY_ENV) $(PYTHON) -m cli poll $(if $(V),-v) $(if $(DEBUG),--debug) $(if $(REPLAY),--replay $(REPLAY))
@@ -79,18 +63,15 @@ test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2]
 types: ## Regenerate TypeScript types from Pydantic models
 	PYTHONPATH=services $(PYTHON) schema_gen.py shared > types/shared/types.schema.json
 	npx --yes json-schema-to-typescript types/shared/types.schema.json > types/shared/types.d.ts
-	PYTHONPATH=services/poller:services/remote-client:services $(PYTHON) schema_gen.py poller_models > types/poller/types.schema.json
+	PYTHONPATH=services/poller:services $(PYTHON) schema_gen.py poller_models > types/poller/types.schema.json
 	npx --yes json-schema-to-typescript types/poller/types.schema.json > types/poller/types.d.ts
-	PYTHONPATH=services/poller:services/remote-client:services $(PYTHON) schema_gen.py rc_models > types/http/types.schema.json
-	npx --yes json-schema-to-typescript types/http/types.schema.json > types/http/types.d.ts
-	@echo "Generated types/shared/types.d.ts + types/poller/types.d.ts + types/http/types.d.ts"
+	@echo "Generated types/shared/types.d.ts + types/poller/types.d.ts"
 
 test: ## Run unit tests
-	PYTHONPATH=.:services/poller:services/remote-client:services:services/debug $(PYTHON) -m pytest -v
+	PYTHONPATH=.:services/poller:services:services/debug $(PYTHON) -m pytest -v
 
 typecheck: ## Run mypy strict type checking
 	MYPYPATH=services/poller:services $(PYTHON) -m mypy services/poller/ cli/test_webhook.py
-	MYPYPATH=services/remote-client:services/poller:services $(PYTHON) -m mypy services/remote-client/
 	MYPYPATH=services $(PYTHON) -m mypy services/notifier/
 	MYPYPATH=services $(PYTHON) -m mypy services/dedup/
 	MYPYPATH=services $(PYTHON) -m mypy services/shared/
@@ -98,15 +79,11 @@ typecheck: ## Run mypy strict type checking
 	$(PYTHON) -m mypy schema_gen.py
 
 lint: ## Run ruff linter (use FIX=1 to auto-fix)
-	$(PYTHON) -m ruff check services/poller/ services/remote-client/ services/notifier/ services/dedup/ services/shared/ services/debug/ cli/ schema_gen.py $(if $(FIX),--fix)
+	$(PYTHON) -m ruff check services/poller/ services/notifier/ services/dedup/ services/shared/ services/debug/ cli/ schema_gen.py $(if $(FIX),--fix)
 
 local-up: ## Start full stack locally (no TLS, direct port access)
 	@if [ -f .env ]; then \
 		. ./.env; \
-		rc="$${REMOTE_CLIENT_ENABLED:-true}"; \
-		if [ "$$rc" = "false" ] || [ "$$rc" = "0" ] || [ "$$rc" = "no" ] || [ -z "$$rc" ]; then \
-			export GATEWAY_REPLICAS=$${GATEWAY_REPLICAS:-0}; \
-		fi; \
 		pe="$${POLLER_ENABLED:-true}"; \
 		if [ "$$pe" = "false" ] || [ "$$pe" = "0" ] || [ "$$pe" = "no" ] || [ -z "$$pe" ]; then \
 			export POLLER_REPLICAS=$${POLLER_REPLICAS:-0}; \
@@ -115,13 +92,23 @@ local-up: ## Start full stack locally (no TLS, direct port access)
 		if [ -n "$$(printf '%s' "$$debug_webhook_path" | tr -d '[:space:]')" ]; then \
 			export DEBUG_REPLICAS=$${DEBUG_REPLICAS:-1}; \
 		fi; \
+		if [ -n "$$(printf '%s' "$${IBKR_FLEX_QUERY_ID_2:-}" | tr -d '[:space:]')" ]; then \
+			flex_token_2="$$(printf '%s' "$${IBKR_FLEX_TOKEN_2:-}" | tr -d '[:space:]')"; \
+			flex_token_primary="$$(printf '%s' "$${IBKR_FLEX_TOKEN:-}" | tr -d '[:space:]')"; \
+			if [ -z "$$flex_token_2" ] && [ -z "$$flex_token_primary" ]; then \
+				echo "Error: IBKR_FLEX_QUERY_ID_2 is set, but poller-2 also requires IBKR_FLEX_TOKEN_2 or IBKR_FLEX_TOKEN." >&2; \
+				exit 1; \
+			fi; \
+			export COMPOSE_PROFILES="$${COMPOSE_PROFILES:+$$COMPOSE_PROFILES,}poller2"; \
+		fi; \
 	fi && \
 	$(LOCAL_COMPOSE) up -d --build
 	@echo ""
-	@echo "  REST API: http://localhost:15000/health"
 	@echo "  Poller:   http://localhost:15001/health"
-	@echo "  VNC:      http://localhost:15002"
 	@if [ -f .env ]; then . ./.env; fi; \
+	if [ -n "$$IBKR_FLEX_QUERY_ID_2" ]; then \
+		echo "  Poller-2: http://localhost:15002/health"; \
+	fi; \
 	if [ -n "$$(printf '%s' "$$DEBUG_WEBHOOK_PATH" | tr -d '[:space:]')" ]; then \
 		echo "  Debug:    http://localhost:15003/debug/webhook/$$DEBUG_WEBHOOK_PATH"; \
 	fi
@@ -130,42 +117,12 @@ local-up: ## Start full stack locally (no TLS, direct port access)
 local-down: ## Stop local stack
 	$(LOCAL_COMPOSE) down
 
-e2e-up: ## Start E2E test stack (IB Gateway + remote-client + poller)
-	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — copy .env.test.example to .env.test and fill in credentials"; exit 1; }
-	@if curl -sf http://localhost:15010/health | grep -q '"connected": true' && \
-	    curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
+e2e-up: ## Start E2E test stack (poller + ibkr-debug)
+	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — run: cp .env.test.example .env.test (placeholder values are fine)"; exit 1; }
+	@if curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 		echo "Stack already running and connected"; \
 	else \
 		$(E2E_COMPOSE) up -d --build; \
-		echo "Waiting for remote-client to connect to IB Gateway..."; \
-		rc_ready=false; \
-		for i in $$(seq 1 24); do \
-			if curl -sf http://localhost:15010/health | grep -q '"connected": true'; then \
-				rc_ready=true; \
-				echo "remote-client ready"; break; \
-			fi; \
-			if $(E2E_COMPOSE) logs ib-gateway 2>&1 | grep -q "Existing session detected"; then \
-				echo ""; \
-				echo "ERROR: IB Gateway detected an existing session (another login is active)."; \
-				echo "This is likely the production droplet or another local stack."; \
-				echo "Disconnect that session first, then:  make e2e-down && make e2e-up"; \
-				echo ""; \
-				exit 1; \
-			fi; \
-			if ! $(E2E_COMPOSE) ps ib-gateway --status running -q 2>/dev/null | grep -q .; then \
-				echo ""; \
-				echo "ERROR: ib-gateway container exited unexpectedly."; \
-				echo "Last logs:"; \
-				$(E2E_COMPOSE) logs --tail=20 ib-gateway; \
-				echo ""; \
-				exit 1; \
-			fi; \
-			sleep 10; \
-		done; \
-		if [ "$$rc_ready" != "true" ]; then \
-			echo "ERROR: remote-client did not connect to IB Gateway within 240s"; \
-			exit 1; \
-		fi; \
 		echo "Waiting for poller..."; \
 		poller_ready=false; \
 		for i in $$(seq 1 10); do \
@@ -182,18 +139,16 @@ e2e-up: ## Start E2E test stack (IB Gateway + remote-client + poller)
 	fi
 
 e2e-down: ## Stop and remove E2E test stack
-	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — nothing to tear down"; exit 1; }
-	$(E2E_COMPOSE) down
+	$(E2E_COMPOSE_DOWN) down
 
 e2e-run: ## Run E2E tests (stack must be up)
-	@$(E2E_COMPOSE) restart remote-client poller ibkr-debug > /dev/null 2>&1 && sleep 3
-	$(PYTHON) -m pytest services/remote-client/tests/e2e/ services/poller/tests/e2e/ -v
+	@$(E2E_COMPOSE) restart poller ibkr-debug > /dev/null 2>&1 && sleep 3
+	$(PYTHON) -m pytest services/poller/tests/e2e/ -v
 
-e2e: ## Run E2E tests against local paper account (starts/stops stack)
-	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — copy .env.test.example to .env.test and fill in credentials"; exit 1; }
+e2e: ## Run E2E tests (starts/stops stack automatically)
+	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — run: cp .env.test.example .env.test (placeholder values are fine)"; exit 1; }
 	@was_up=false; \
-	if curl -sf http://localhost:15010/health | grep -q '"connected": true' && \
-	   curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
+	if curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 		was_up=true; \
 	fi; \
 	$(MAKE) e2e-up && $(MAKE) e2e-run; ret=$$?; \
@@ -215,14 +170,6 @@ stats: ## Show container resource usage
 	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
 		'docker stats --no-stream'
 
-gateway: ## Start IB Gateway container (then open VNC for 2FA)
-	@. ./.env && \
-		rc="$${REMOTE_CLIENT_ENABLED:-true}"; \
-		if [ "$$rc" = "false" ] || [ "$$rc" = "0" ] || [ "$$rc" = "no" ] || [ -z "$$rc" ]; then \
-			echo "ERROR: REMOTE_CLIENT_ENABLED is false — gateway stack is disabled" >&2; exit 1; \
-		fi && \
-		ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
-		'cd /opt/$(PROJECT) && docker compose up -d ib-gateway && sleep 2 && docker compose ps ib-gateway'
-
 ssh: ## SSH into the droplet
 	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP
+

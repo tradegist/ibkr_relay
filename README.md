@@ -1,25 +1,23 @@
 # IBKR Webhook Relay
 
-Deploy a fully functional **Interactive Brokers Gateway API** to your own server with a few environment variables and one command.
+Poll the IBKR [Flex Web Service](https://www.interactivebrokers.com/campus/ibkr-api-page/flex-web-service/) for trade fills and forward them to your webhook URL — deployed to a DigitalOcean droplet with a single `make deploy`.
 
 > [!WARNING]
 > This project is under active development and not yet ready for prime time. You're welcome to use it, but expect frequent breaking changes.
 
 ## Why This Project?
 
-IBKR has a notoriously difficult API. To automate anything — placing orders, getting fill confirmations — you need to run their Java-based Gateway or TWS application. That means either keeping it running on your local machine (impractical for web apps or any always-on service) or setting it up on a remote server (surprisingly painful to get right).
+IBKR's Flex Web Service is the most reliable way to get trade confirmations — it works without an active Gateway session, so you can trade normally via web or mobile and know that fills will be captured. But building the polling infrastructure (scheduled fetches, XML parsing, dedup, webhook delivery, HTTPS) takes time.
 
-Thankfully, amazing open-source projects like [`ib_async`](https://github.com/ib-api-reloaded/ib_async), [`ib-gateway-docker`](https://github.com/gnzsnz/ib-gateway-docker), and others have made the core pieces much more accessible. This project wouldn't exist without them.
+This project bundles everything into a single `make deploy` that provisions a DigitalOcean droplet (starting at **$4/month**) with:
 
-But even with those libraries, you still need to **build a Python app, deploy it somewhere, handle HTTPS, 2FA, reconnections, and webhooks**. That's where this project comes in — it bundles everything into a single `make deploy` that provisions a DigitalOcean droplet (starting at $4/month for poller-only, or $12/month with the full gateway stack) with:
-
-- **An HTTPS endpoint to place orders** via a simple REST API
 - **A poller** that checks for trade fills every 10 minutes and sends them to your webhook URL
-- **A real-time listener** (opt-in) that fires webhooks immediately when orders fill via IB Gateway events
+- **Automatic HTTPS** via Caddy + Let's Encrypt
+- **SQLite dedup** so each fill is delivered exactly once
+- **A debug webhook inbox** for testing without hitting production services
+- **An optional second poller** for a different IBKR account/query
 
-> **Only one endpoint for now?** Yes — more APIs will be exposed as the need arises. PRs welcome.
-
-> **Why both a poller and a listener?** The poller uses the [Flex Web Service](https://www.interactivebrokers.com/campus/ibkr-api-page/flex-web-service/) (a REST API) — it **does not require an active Gateway session**. You can close the gateway, trade normally via web/mobile, and know that ~10 minutes later the poller will catch any fills. The listener gives you **instant** webhooks (sub-second) but only works while the Gateway is connected. Use the poller as your reliable baseline, and optionally enable the listener for real-time notifications when the Gateway is up.
+> **Looking for order placement or real-time trade events?** See [ibkr_bridge](https://github.com/tradegist/ibkr_bridge) — a companion project that runs the IB Gateway and exposes an HTTP API for placing orders, with an optional real-time listener.
 
 ## Table of Contents
 
@@ -27,10 +25,6 @@ But even with those libraries, you still need to **build a Python app, deploy it
 - [Architecture](#architecture)
 - [Quick Start](#quick-start-local-deploy)
 - [Configuration](#configuration)
-- [Domains & HTTPS](#domains--https)
-- [Memory & Droplet Sizing](#memory--droplet-sizing)
-- [Gateway Management](#gateway-management)
-- [Placing Orders](#placing-orders)
 - [Webhook Payload](#webhook-payload)
   - [Debug Webhook Inbox](#debug-webhook-inbox)
 - [Flex Web Service Setup](#flex-web-service-setup)
@@ -43,33 +37,11 @@ But even with those libraries, you still need to **build a Python app, deploy it
 - [Project Structure](#project-structure)
 - [Current Status](#current-status)
 - [Flex XML Parsing](#flex-xml-parsing)
-- [Real-Time Listener](#real-time-listener)
+- [IBKR ID Reference](#ibkr-id-reference)
 
 ## API Endpoints
 
-All endpoints require `Authorization: Bearer <API_TOKEN>` header.
-
-#### Place an order
-
-```
-POST /ibkr/order
-```
-
-```json
-{
-  "contract": {
-    "symbol": "TSLA",
-    "secType": "STK",
-    "exchange": "SMART",
-    "currency": "USD"
-  },
-  "order": {
-    "action": "BUY",
-    "totalQuantity": 2,
-    "orderType": "MKT"
-  }
-}
-```
+All endpoints require `Authorization: Bearer <API_TOKEN>` header (except health).
 
 #### Trigger a poll
 
@@ -85,112 +57,77 @@ No body required. Immediately polls the Flex Web Service for new fills and sends
 GET /health
 ```
 
-Returns `{"connected": true, "tradingMode": "paper"}` when the relay has an active connection to IB Gateway, `false` during reconnection (e.g. after a gateway restart). No auth required.
+Returns `{"status": "ok"}`. No auth required.
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  DigitalOcean Droplet (auto-sized based on JAVA_HEAP_SIZE)   │
-│                                                              │
-│  ┌─────────────────┐   Docker    ┌─────────────────────────┐ │
-│  │  ib-gateway     │  Network   │  remote-client           │ │
-│  │  gnzsnz/ib-gw   │◄──────────►│  Python 3.11             │ │
-│  │  API: 4003/4004 │            │  ib_async + HTTP API     │ │
-│  │  VNC: 5900      │            │  (order placement)       │ │
-│  └────────┬────────┘            └───────────▲──────────────┘ │
-│           │                                 │                │
-│  ┌────────▼─────────┐            ┌──────────┴──────────────┐ │
-│  │  novnc           │            │  poller                 │ │
-│  │  Browser VNC     │            │  Flex Web Service       │ │
-│  │  (2FA access)    │            │  → Webhook POST         │ │
-│  └────────▲─────────┘            │  SQLite dedup           │ │
-│           │                      └─────────────────────────┘ │
-│  ┌────────┴─────────────────────────────────┐                │
-│  │  caddy (reverse proxy + auto HTTPS)      │                │
-│  │  vnc.example.com   → novnc:8080          │                │
-│  │  trade.example.com → remote-client:5000  │                │
-│  │  Ports: 80 (HTTP→redirect), 443 (HTTPS)  │                │
-│  └──────────────────────────────────────────┘                │
-│                                                              │
-│  Firewall: SSH from deployer IP only                         │
-│  HTTP/HTTPS open (Caddy auto-redirects HTTP → HTTPS)         │
-│  IBKR API ports are internal-only (not exposed)              │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  DigitalOcean Droplet                                    │
+│                                                          │
+│  ┌──────────────────────────────────────────────┐        │
+│  │  caddy (reverse proxy + auto HTTPS)          │        │
+│  │  trade.example.com → poller:8000             │        │
+│  │  Ports: 80 (HTTP→redirect), 443 (HTTPS)      │        │
+│  └──────────────┬──────────────────┬────────────┘        │
+│                 │                  │                      │
+│  ┌──────────────▼───────┐  ┌──────▼──────────────────┐   │
+│  │  poller              │  │  ibkr-debug (optional)   │   │
+│  │  Flex Web Service    │  │  Webhook payload inbox   │   │
+│  │  → Webhook POST      │  │  POST/GET/DELETE         │   │
+│  │  SQLite dedup        │  └─────────────────────────┘   │
+│  └──────────────────────┘                                │
+│                                                          │
+│  [poller-2] (optional, same image, different account)    │
+│                                                          │
+│  Firewall: SSH from deployer IP only                     │
+│  HTTP/HTTPS open (Caddy auto-redirects HTTP → HTTPS)     │
+└──────────────────────────────────────────────────────────┘
 ```
 
-Six containers in a single Docker network:
+Four containers in a single Docker network (poller-2 and ibkr-debug are optional):
 
-- **`ib-gateway`** — [`ghcr.io/gnzsnz/ib-gateway:stable`](https://github.com/gnzsnz/ib-gateway-docker). IBC automates login. VNC on port 5900 (raw), API on 4003 (live) / 4004 (paper).
-- **`novnc`** — [`theasp/novnc`](https://hub.docker.com/r/theasp/novnc). Browser-based VNC proxy for completing 2FA.
-- **`caddy`** — [Caddy 2](https://caddyserver.com/) reverse proxy with automatic HTTPS via Let's Encrypt. Routes traffic to the correct backend based on domain (see [Domains & HTTPS](#domains--https)).
-- **`remote-client`** — Python image connected to IB Gateway via `ib_async`. Exposes an HTTP API (internal port 5000) for placing stock orders, secured with Bearer token authentication.
+- **`caddy`** — [Caddy 2](https://caddyserver.com/) reverse proxy with automatic HTTPS via Let's Encrypt. Routes `/ibkr/*` to the poller.
 - **`poller`** — Python image that polls the IBKR Flex Web Service every 10 minutes for new fills and sends them via pluggable notification backends (see `services/notifier/`). Supports both **Trade Confirmation** and **Activity** Flex Query types. Uses SQLite for deduplication. **Does not hold an IBKR session** — trade normally via web/mobile.
-- **`gateway-controller`** — Lightweight Alpine sidecar with Docker CLI. Exposes a CGI endpoint so the noVNC page can start the gateway container from the browser.
+- **`poller-2`** — Optional second poller instance (behind the `poller2` profile) for a different IBKR account or query. Same image, separate config via `_2` suffixed env vars.
+- **`ibkr-debug`** — Optional debug webhook inbox. Captures webhook payloads for inspection during development. Enabled when `DEBUG_WEBHOOK_PATH` is set.
 
-> **Dedup guarantee.** Both the poller and the listener share a SQLite dedup database so each fill is delivered at most once under normal operation. In the rare event of an internal crash between webhook delivery and dedup bookkeeping, a fill may be sent a second time. Design your webhook consumer to be idempotent (e.g. deduplicate on `execId`).
+> **Dedup guarantee.** The poller uses a SQLite dedup database so each fill is delivered at most once under normal operation. In the rare event of an internal crash between webhook delivery and dedup bookkeeping, a fill may be sent a second time. Design your webhook consumer to be idempotent (e.g. deduplicate on `execId`).
 
 ## Domains & HTTPS
 
-Two domain names are **required**. Caddy uses them to automatically provision TLS certificates from Let's Encrypt, providing secure HTTPS connections. Without valid domains, Caddy cannot obtain certificates and the services will not be accessible — there is no fallback to plain HTTP or IP-based access.
-
-| Environment Variable | Purpose                                                      | Example             |
-| -------------------- | ------------------------------------------------------------ | ------------------- |
-| `VNC_DOMAIN`         | Serves the noVNC interface for IB Gateway 2FA authentication | `vnc.example.com`   |
-| `SITE_DOMAIN`        | Serves the order placement API (`/ibkr/order`, `/health`)    | `trade.example.com` |
+A domain name is **required**. Caddy uses it to automatically provision a TLS certificate from Let's Encrypt. Without a valid domain, Caddy cannot obtain a certificate and the service will not be accessible — there is no fallback to plain HTTP or IP-based access.
 
 ### Setup
 
-1. Point **both** domains to the droplet's reserved IP as **A records**:
+1. Point the domain to the droplet's reserved IP as an **A record**:
    ```
-   vnc.example.com    A    181.66.270.412
-   trade.example.com  A    181.66.270.412
+   trade.example.com  A  1.2.3.4
    ```
-2. Set both in `.env`:
+2. Set it in `.env`:
    ```
-   VNC_DOMAIN=vnc.example.com
    SITE_DOMAIN=trade.example.com
    ```
-3. Start the stack — Caddy will automatically obtain and renew certificates for both domains.
+3. Start the stack — Caddy will automatically obtain and renew the certificate.
 
-> **Why two domains?** The VNC interface provides direct access to IB Gateway for 2FA and manual management. The trade API is a separate concern with its own authentication (Bearer token). Separating them on different domains provides clean isolation — you can restrict VNC access at the DNS/firewall level without affecting the trade API, and vice versa.
+> **Can I use just an IP address?** No. Let's Encrypt does not issue certificates for bare IP addresses.
 
-> **Can I use just an IP address?** No. Let's Encrypt does not issue certificates for bare IP addresses. The Caddy reverse proxy requires valid domain names to provision TLS certificates. Both `VNC_DOMAIN` and `SITE_DOMAIN` must be set or the stack will refuse to start.
+## Droplet Sizing
 
-## Memory & Droplet Sizing
-
-IB Gateway runs on Java and its performance depends on the heap memory allocation. Set `JAVA_HEAP_SIZE` in `.env` (in MB) to control this. The droplet size is **automatically selected** to fit the requested heap plus OS/Docker overhead:
-
-| `JAVA_HEAP_SIZE` | Droplet Size   | RAM   | Approx. Cost |
-| ---------------- | -------------- | ----- | ------------ |
-| ≤ 1024 (default) | `s-1vcpu-2gb`  | 2 GB  | ~$12/mo      |
-| 1025 – 3072      | `s-2vcpu-4gb`  | 4 GB  | ~$24/mo      |
-| 3073 – 6144      | `s-4vcpu-8gb`  | 8 GB  | ~$48/mo      |
-| 6145 – 10240     | `s-8vcpu-16gb` | 16 GB | ~$96/mo      |
-
-IBKR recommends **4096** for API users. The default (768) works but may be slow for data-heavy operations.
-
-You can also set `DROPLET_SIZE` directly to override the heap-based selection. If you only need a poller, set a droplet size of 512 MB ($4/month) or 1 GB ($6/month):
+Set `DROPLET_SIZE` in `.env` to control the droplet size. The poller is lightweight — the smallest droplet ($4/month) works fine:
 
 ```env
-# .env — poller-only deployment
-REMOTE_CLIENT_ENABLED=false
-DROPLET_SIZE=s-1vcpu-512mb
-```
-
-```env
-# .env — full gateway stack
-JAVA_HEAP_SIZE=4096
+DROPLET_SIZE=s-1vcpu-512mb   # $4/month (default)
 ```
 
 ## Quick Start (Local Deploy)
 
 ### Prerequisites
 
-- [Docker Compose v2](https://docs.docker.com/compose/install/) (the Go rewrite, `docker compose` — not the legacy Python `docker-compose`). Required for `deploy.replicas` support, which is how `POLLER_ENABLED` and `REMOTE_CLIENT_ENABLED` disable services.
+- [Docker Compose v2](https://docs.docker.com/compose/install/) (the Go rewrite, `docker compose` — not the legacy Python `docker-compose`). Required for `deploy.replicas` support, which is how `POLLER_ENABLED` disables services.
 - [Terraform](https://developer.hashicorp.com/terraform/install) installed
 - A [DigitalOcean API token](https://cloud.digitalocean.com/account/api/tokens)
-- An IBKR account (paper or live)
+- An IBKR account with Flex Web Service enabled (see [Flex Web Service Setup](#flex-web-service-setup))
 
 ### Steps
 
@@ -205,53 +142,32 @@ cp .env.example .env
 # 2. Deploy
 make deploy
 
-# 3. Complete 2FA
-# Open the VNC URL printed by deploy in your browser
-# Log in and approve the 2FA prompt
-
-# 4. Tear down when done
+# 3. Tear down when done
 make destroy
 ```
 
 ## Testing
 
-### Unit tests
-
 ```bash
 make test        # run pytest (poller, parser, models)
 make typecheck   # strict mypy checking
+make lint        # run ruff linter
 ```
 
 ### E2E tests
 
-End-to-end tests run against a local Docker stack with a real IB Gateway connected to a **paper trading account**. Real orders are placed in paper mode.
+E2E tests run against a local Docker stack (`docker-compose.test.yml`) with the poller and debug webhook inbox.
 
-**Setup:**
+```bash
+make e2e          # start stack → run tests → stop stack
+make e2e-up       # start test stack (idempotent)
+make e2e-run      # run E2E tests (stack must be up)
+make e2e-down     # stop and remove test stack
+```
 
-1. Copy the template and fill in your paper account credentials:
-
-   ```bash
-   cp .env.test.example .env.test
-   # Edit .env.test with your IBKR paper username and password
-   ```
-
-2. Make sure Docker Desktop is running.
-
-3. Run the tests:
-
-   ```bash
-   make e2e          # start stack → run tests → tear down
-   ```
-
-   Or manage the stack manually:
-
-   ```bash
-   make e2e-up       # start ib-gateway + remote-client (paper mode)
-   make e2e-run      # run tests (stack must be up)
-   make e2e-down     # stop and remove containers
-   ```
-
-The test stack exposes the API on `http://localhost:15010` with a hardcoded token (`test-token`). The gateway typically connects within ~20 seconds.
+- Credentials live in `.env.test` (gitignored). Template: `.env.test.example`.
+- `make e2e-run` restarts `poller` and `ibkr-debug` containers to pick up code changes from volume mounts, then runs the E2E tests. Safe to call repeatedly — no rebuild needed.
+- Test poller runs on `localhost:15011` with token `test-token`.
 
 ### Local production stack
 
@@ -262,16 +178,15 @@ make local-up     # build and start all services
 make local-down   # stop and remove containers
 ```
 
-`make local-up` reads `.env` and honors `POLLER_ENABLED` and `REMOTE_CLIENT_ENABLED`. You can also override per-command with `make local-up POLLER=0` or `make local-up REMOTE_CLIENT=0`.
+`make local-up` reads `.env` and honors `POLLER_ENABLED`.
 
 Endpoints after startup:
 
-| Service   | URL                                                                            |
-| --------- | ------------------------------------------------------------------------------ |
-| REST API  | http://localhost:15000/health                                                  |
-| Poller    | http://localhost:15001/health                                                  |
-| VNC (2FA) | http://localhost:15002                                                         |
-| Debug     | http://localhost:15003/debug/webhook/{path} (when `DEBUG_WEBHOOK_PATH` is set) |
+| Service  | URL                                                                            |
+| -------- | ------------------------------------------------------------------------------ |
+| Poller   | http://localhost:15001/health                                                  |
+| Poller-2 | http://localhost:15002/health (when `IBKR_FLEX_QUERY_ID_2` is set)             |
+| Debug    | http://localhost:15003/debug/webhook/{path} (when `DEBUG_WEBHOOK_PATH` is set) |
 
 #### Updating the local stack after code changes
 
@@ -286,30 +201,29 @@ make sync ENV=local          # explicit: restart local stack
 
 ## TypeScript Types
 
-Webhook payload and order placement types are available as a TypeScript package under `types/`:
+Webhook payload types are available as a TypeScript package under `types/`:
 
 ```
 types/
-  index.d.ts                 # Barrel: exports IbkrPoller, IbkrHttp namespaces
+  index.d.ts                 # Barrel: exports Ibkr, IbkrPoller namespaces
   package.json               # @tradegist/ibkr-relay-types
-  poller/
-    index.d.ts               # Re-exports: BuySell, WebhookPayload, Trade
-    types.d.ts               # Generated from poller_models.py SCHEMA_MODELS
+  shared/
+    index.d.ts               # Re-exports: BuySell, Fill, Trade, WebhookPayloadTrades, WebhookPayload
+    types.d.ts               # Generated from shared/__init__.py SCHEMA_MODELS
     types.schema.json         # Intermediate JSON Schema
-  http/
-    index.d.ts               # Re-exports: PlaceOrderPayload, ContractPayload, OrderPayload, PlaceOrderResponse
-    types.d.ts               # Generated from rc_models.py SCHEMA_MODELS
+  poller/
+    index.d.ts               # Re-exports: RunPollResponse, HealthResponse
+    types.d.ts               # Generated from poller_models.py SCHEMA_MODELS
     types.schema.json         # Intermediate JSON Schema
 ```
 
 Usage:
 
 ```typescript
-import { Ibkr, IbkrPoller, IbkrHttp } from "@tradegist/ibkr-relay-types";
+import { Ibkr, IbkrPoller } from "@tradegist/ibkr-relay-types";
 
 const payload: Ibkr.WebhookPayload = ...;   // discriminated union (use this for consumers)
 const poll: IbkrPoller.RunPollResponse = ...; // poller-specific types
-const order: IbkrHttp.PlaceOrderPayload = ...; // order API types
 ```
 
 Types are auto-generated from the Pydantic models via `make types`. The `Trade` type follows the CommonFill contract (`orderId`, `symbol`, `side`, `volume`, `price`, `fee`, `cost`, `orderType`, `timestamp`, `source`, `raw`, `fillCount`, `execIds`). The package is not yet published to npm — the API is still evolving.
@@ -318,32 +232,28 @@ Types are auto-generated from the Pydantic models via `make types`. The `Trade` 
 
 All configuration is via environment variables in `.env`:
 
-| Variable                       | Required | Default            | Description                                                                                                     |
-| ------------------------------ | -------- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `DO_API_TOKEN`                 | Yes      | —                  | DigitalOcean API token                                                                                          |
-| `TWS_USERID`                   | Yes      | —                  | IBKR account username                                                                                           |
-| `TWS_PASSWORD`                 | Yes      | —                  | IBKR account password                                                                                           |
-| `TRADING_MODE`                 | No       | `paper`            | `paper` or `live`                                                                                               |
-| `VNC_SERVER_PASSWORD`          | Yes      | —                  | Password for noVNC browser access                                                                               |
-| `VNC_DOMAIN`                   | Yes      | —                  | Domain for VNC access (see [Domains & HTTPS](#domains--https))                                                  |
-| `SITE_DOMAIN`                  | Yes      | —                  | Domain for trade API (see [Domains & HTTPS](#domains--https))                                                   |
-| `API_TOKEN`                    | Yes      | —                  | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)                                                   |
-| `IBKR_FLEX_TOKEN`              | Yes      | —                  | Flex Web Service token (from Client Portal)                                                                     |
-| `IBKR_FLEX_QUERY_ID`           | Yes      | —                  | Flex Query ID (Trade Confirmation or Activity)                                                                  |
-| `TARGET_WEBHOOK_URL`           | No       | —                  | Webhook endpoint (empty = log-only dry-run)                                                                     |
-| `WEBHOOK_SECRET`               | No       | —                  | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                            |
-| `NOTIFIERS`                    | No       | —                  | Active notification backends (e.g. `webhook`). Empty = dry-run                                                  |
-| `POLLER_ENABLED`               | No       | `true`             | Set to `false` to disable the poller container entirely                                                         |
-| `REMOTE_CLIENT_ENABLED`        | No       | `true`             | Set to `false` to disable ib-gateway, novnc, remote-client, and gateway-controller (poller-only mode)           |
-| `DROPLET_SIZE`                 | No       | —                  | Override droplet size slug (e.g. `s-1vcpu-512mb`). Ignores `JAVA_HEAP_SIZE` when set                            |
-| `POLL_INTERVAL_SECONDS`        | No       | `600`              | Flex poll interval (seconds)                                                                                    |
-| `LISTENER_ENABLED`             | No       | —                  | Set to any non-empty value to enable real-time trade event listener                                             |
-| `LISTENER_EXEC_EVENTS_ENABLED` | No       | —                  | Enable `execDetailsEvent` webhooks (preliminary fill, no commission). Default: disabled                         |
-| `LISTENER_EVENT_DEBOUNCE_TIME` | No       | `0`                | Debounce window in ms for `commissionReportEvent` fills. `0` = immediate dispatch                               |
-| `DEBUG_WEBHOOK_PATH`           | No       | —                  | Route webhooks to debug inbox instead of `TARGET_WEBHOOK_URL` (see [Debug Webhook Inbox](#debug-webhook-inbox)) |
-| `MAX_DEBUG_WEBHOOK_PAYLOADS`   | No       | `100`              | Max payloads stored in the debug inbox (hard max: 150, FIFO eviction)                                           |
-| `DEBUG_LOG_LEVEL`              | No       | `INFO`             | Set to `DEBUG` to include full payload+headers in `docker logs ibkr-debug`                                      |
-| `TIME_ZONE`                    | No       | `America/New_York` | Timezone (tz database format)                                                                                   |
+| Variable                     | Required | Default             | Description                                                                                                     |
+| ---------------------------- | -------- | ------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `DEPLOY_MODE`                | Yes      | —                   | `standalone` (own droplet via Terraform) or `shared` (deploy to existing droplet)                               |
+| `DO_API_TOKEN`               | Yes\*    | —                   | DigitalOcean API token (standalone mode only — can be removed after first deploy)                               |
+| `DROPLET_IP`                 | Yes\*    | —                   | Droplet IP (from Terraform output in standalone; provided by host in shared)                                    |
+| `SSH_KEY`                    | No       | `~/.ssh/ibkr-relay` | SSH key path — **shared mode only**. In standalone, Terraform auto-generates and saves the key; never set this. |
+| `SITE_DOMAIN`                | Yes      | —                   | Domain for the poller API (see [Domains & HTTPS](#domains--https))                                              |
+| `API_TOKEN`                  | Yes      | —                   | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)                                                   |
+| `IBKR_FLEX_TOKEN`            | Yes      | —                   | Flex Web Service token (from Client Portal)                                                                     |
+| `IBKR_FLEX_QUERY_ID`         | Yes      | —                   | Flex Query ID (Trade Confirmation or Activity)                                                                  |
+| `TARGET_WEBHOOK_URL`         | No       | —                   | Webhook endpoint (empty = log-only dry-run)                                                                     |
+| `WEBHOOK_SECRET`             | No       | —                   | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                            |
+| `NOTIFIERS`                  | No       | —                   | Active notification backends (e.g. `webhook`). Empty = dry-run                                                  |
+| `POLLER_ENABLED`             | No       | `true`              | Set to `false` to disable the poller container entirely                                                         |
+| `DROPLET_SIZE`               | No       | `s-1vcpu-512mb`     | Override droplet size slug (e.g. `s-1vcpu-1gb`)                                                                 |
+| `POLL_INTERVAL_SECONDS`      | No       | `600`               | Flex poll interval (seconds)                                                                                    |
+| `DEBUG_WEBHOOK_PATH`         | No       | —                   | Route webhooks to debug inbox instead of `TARGET_WEBHOOK_URL` (see [Debug Webhook Inbox](#debug-webhook-inbox)) |
+| `MAX_DEBUG_WEBHOOK_PAYLOADS` | No       | `100`               | Max payloads stored in the debug inbox (hard max: 150, FIFO eviction)                                           |
+| `DEBUG_LOG_LEVEL`            | No       | `INFO`              | Set to `DEBUG` to include full payload+headers in `docker logs ibkr-debug`                                      |
+
+**Second poller (optional):** Set `IBKR_FLEX_QUERY_ID_2` to enable a second independent poller with its own webhook destination. `IBKR_FLEX_TOKEN_2` is optional — when omitted, the primary `IBKR_FLEX_TOKEN` is used (useful when both queries share the same token). All `_2` suffixed env vars (`NOTIFIERS_2`, `TARGET_WEBHOOK_URL_2`, `WEBHOOK_SECRET_2`, `POLL_INTERVAL_SECONDS_2`, etc.) follow the same pattern.
+| `TIME_ZONE` | No | `America/New_York` | Timezone (tz database format) |
 
 ## Webhook Payload
 
@@ -408,10 +318,10 @@ All exchange relays (IBKR, Kraken, etc.) use the same **CommonFill** model. The 
 | `fillCount`  | `number`            | Number of fills aggregated into this trade                                                |
 | `execIds`    | `string[]`          | One execution ID per fill (for tracing back to individual fills)                          |
 | `timestamp`  | `string`            | Latest fill timestamp                                                                     |
-| `source`     | `string`            | Origin: `"flex"`, `"execDetailsEvent"`, or `"commissionReportEvent"`                      |
+| `source`     | `string`            | Origin: `"flex"` (from Flex Web Service poll)                                             |
 | `raw`        | `object`            | Original exchange-specific payload (all fields, unmodified)                               |
 
-The `raw` object preserves the full exchange-specific data. For IBKR Flex, this includes ~100 XML attributes (account info, security details, financial fields, dates). For ib_async listener events, it includes a smaller set of fields from the execution/commission report objects. Consumers should treat `raw` as opaque exchange data — the CommonFill fields above are the stable contract.
+The `raw` object preserves the full exchange-specific data. For IBKR Flex, this includes ~100 XML attributes (account info, security details, financial fields, dates). Consumers should treat `raw` as opaque exchange data — the CommonFill fields above are the stable contract.
 
 The `errors` array contains warnings about parse problems — it is empty when everything parsed cleanly.
 
@@ -445,7 +355,7 @@ DEBUG_WEBHOOK_PATH=abcdef
 #DEBUG_LOG_LEVEL=INFO
 ```
 
-This starts the `ibkr-debug` container and reroutes all webhook delivery (from both the poller and listener) to an in-memory inbox at `/debug/webhook/<path>`. The real `TARGET_WEBHOOK_URL` is ignored while this is set.
+This starts the `ibkr-debug` container and reroutes all webhook delivery to an in-memory inbox at `/debug/webhook/<path>`. The real `TARGET_WEBHOOK_URL` is ignored while this is set.
 
 **Inspect captured payloads:**
 
@@ -478,12 +388,7 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make pause       Snapshot droplet + delete (save costs)
   make resume      Restore droplet from snapshot
   make setup       Create .venv and install all dependencies
-  make deploy      Deploy infrastructure (Terraform + Docker)
-  make destroy     Permanently destroy all infrastructure
-  make pause       Snapshot droplet + delete (save costs)
-  make resume      Restore droplet from snapshot
-  make sync        Push .env + restart (S=gateway B=1 LOCAL_FILES=1 SKIP_E2E=1)
-  make order       Place a stock order (Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE] [TIF=GTC] [RTH=1])
+  make sync        Push .env + restart (S=service B=1 LOCAL_FILES=1 ENV=local)
   make poll        Trigger an immediate Flex poll (V=1 verbose, DEBUG=1 XML, REPLAY=N resend)
   make poll2       Trigger immediate Flex poll (second poller)
   make test-webhook Send sample trades to webhook endpoint
@@ -491,13 +396,12 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make test        Run unit tests (pytest)
   make typecheck   Run mypy strict type checking
   make lint        Run ruff linter (FIX=1 to auto-fix)
-  make e2e         Run E2E tests against local paper account
-  make e2e-up      Start E2E test stack (IB Gateway + remote-client)
+  make e2e         Run E2E tests (starts/stops stack automatically)
+  make e2e-up      Start E2E test stack (poller + ibkr-debug)
   make e2e-run     Run E2E tests (stack must be up)
   make e2e-down    Stop and remove E2E test stack
   make local-up    Start full stack locally (no TLS, direct port access)
   make local-down  Stop local stack
-  make gateway     Start IB Gateway container (then open VNC for 2FA)
   make logs        Stream logs (S=service ENV=local, default: poller on droplet)
   make stats       Show container resource usage
   make ssh         SSH into the droplet
@@ -511,9 +415,7 @@ You can also invoke the CLI directly with `python3 -m cli <command>` — useful 
 
 ```bash
 python3 -m cli deploy
-python3 -m cli sync gateway
-python3 -m cli order 2 TSLA MKT
-python3 -m cli order -2 TSLA LMT 380
+python3 -m cli sync poller
 python3 -m cli poll
 python3 -m cli poll 2 # second poller
 python3 -m cli test-webhook   # send sample trades to webhook 1
@@ -528,30 +430,24 @@ python3 -m cli destroy
 ```bash
 make deploy                                    # provision droplet + start containers
 make sync                                      # push .env + restart all services
-make sync S=gateway                            # push .env + restart one service
+make sync S=poller                             # push .env + restart one service
 make sync B=1                                  # push .env + rebuild images + restart
 make sync LOCAL_FILES=1                        # rsync files + rebuild + restart (full deploy)
 make sync LOCAL_FILES=1 S=poller               # full deploy, rebuild only poller
-make order Q=2 SYM=TSLA T=MKT                  # buy 2 TSLA at market
-make order Q=-2 SYM=TSLA T=LMT P=380           # sell 2 TSLA limit $380
-make order Q=10 SYM=CSPX T=LMT P=590 CUR=EUR   # buy European ETF in EUR
 make poll                                      # trigger immediate Flex poll
 make poll V=1                                  # verbose (SSH, full poller logs)
 make poll DEBUG=1                              # dump raw Flex XML
 make poll REPLAY=3                             # resend 3 trades (skip dedup)
+make poll2                                     # trigger second poller
 make test-webhook                              # send 3 sample trades to webhook
 make test-webhook S=2                          # send to second webhook
 make test                                      # run unit tests
 make typecheck                                 # strict mypy checking
 make logs                                      # stream poller logs (droplet)
-make logs S=remote-client                      # stream relay logs
-make logs S=ib-gateway                         # stream gateway logs
+make logs S=poller-2                           # stream second poller logs
 make logs S=ibkr-debug                         # stream debug inbox logs
 make logs ENV=local                            # stream local stack logs
-make gateway                                   # start gateway + complete 2FA in browser
 ```
-
-> **Note:** `make order` and `make gateway` require the gateway stack. They exit with an error if `REMOTE_CLIENT_ENABLED=false`.
 
 ```bash
 make pause                           # snapshot + delete droplet
@@ -562,24 +458,19 @@ make resume                          # restore from snapshot
 
 After changing a variable in `.env`, restart only the affected service:
 
-| Variable                                                                                                                              | Service       | Command               |
-| ------------------------------------------------------------------------------------------------------------------------------------- | ------------- | --------------------- |
-| `TWS_USERID`, `TWS_PASSWORD`, `TRADING_MODE`, `JAVA_HEAP_SIZE`                                                                        | ib-gateway    | `make sync S=gateway` |
-| `API_TOKEN`                                                                                                                           | remote-client | `make sync S=relay`   |
-| `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, `TARGET_WEBHOOK_URL`, `WEBHOOK_SECRET`, `WEBHOOK_HEADER_NAME/VALUE`, `POLL_INTERVAL_SECONDS` | poller        | `make sync S=poller`  |
-| `POLLER_ENABLED`                                                                                                                      | poller        | `make sync`           |
-| `REMOTE_CLIENT_ENABLED`                                                                                                               | gateway stack | `make sync`           |
-| `VNC_DOMAIN`, `SITE_DOMAIN`                                                                                                           | caddy         | `make sync S=caddy`   |
-| Multiple services or unsure                                                                                                           | all           | `make sync`           |
+| Variable                                                                                                                              | Service | Command              |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------- |
+| `API_TOKEN`                                                                                                                           | poller  | `make sync S=poller` |
+| `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, `TARGET_WEBHOOK_URL`, `WEBHOOK_SECRET`, `WEBHOOK_HEADER_NAME/VALUE`, `POLL_INTERVAL_SECONDS` | poller  | `make sync S=poller` |
+| `POLLER_ENABLED`                                                                                                                      | poller  | `make sync`          |
+| `SITE_DOMAIN`                                                                                                                         | caddy   | `make sync S=caddy`  |
+| Multiple services or unsure                                                                                                           | all     | `make sync`          |
 
 **One-shot overrides** — toggle services for a single command without editing `.env`:
 
 ```bash
 make sync POLLER=0           # disable poller
-make sync REMOTE_CLIENT=0    # disable gateway stack
-make sync REMOTE_CLIENT=1    # re-enable gateway stack
 make local-up POLLER=0       # start local stack without poller
-make local-up REMOTE_CLIENT=0  # start local stack without gateway
 ```
 
 ### Syncing code changes
@@ -607,18 +498,11 @@ This runs a full pre-deploy pipeline before anything reaches the droplet:
 2. Verify working tree is clean (aborts on uncommitted changes)
 3. `make typecheck` — mypy strict type checking
 4. `make test` — all unit tests
-5. `make e2e-run` — E2E tests (requires `make e2e-up` first)
-6. `rsync` project files to the droplet (respects `.gitignore`, excludes `.env`)
-7. Push `.env`
-8. `docker compose up -d --build --force-recreate`
+5. `rsync` project files to the droplet (respects `.gitignore`, excludes `.env`)
+6. Push `.env`
+7. `docker compose up -d --build --force-recreate`
 
 If any step fails, the deploy aborts — nothing reaches the droplet.
-
-To skip E2E tests (e.g. docs-only changes):
-
-```bash
-make sync LOCAL_FILES=1 SKIP_E2E=1
-```
 
 If you forked this repo, pull upstream changes first, then deploy:
 
@@ -635,8 +519,8 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 ├── cli/ # Python CLI (replaces shell scripts)
 │ ├── __init__.py # Project-specific config (CoreConfig setup, helpers)
 │ ├── __main__.py # Entry point (python3 -m cli <command>)
-│ ├── order.py # Place orders via HTTPS API
 │ ├── poll.py # Trigger an immediate Flex poll
+│ ├── test_webhook.py # Send sample trades to webhook endpoint
 │ └── core/ # Project-agnostic (reusable across projects)
 │   ├── __init__.py # CoreConfig dataclass, generic helpers (env, SSH, DO API, Terraform)
 │   ├── deploy.py # Standalone (Terraform + rsync) or shared (rsync + compose)
@@ -650,75 +534,55 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 ├── terraform/
 │ ├── main.tf # Droplet, firewall, reserved IP, SSH key
 │ ├── variables.tf # Terraform variables (infrastructure only)
-│ ├── outputs.tf # Droplet IP, VNC/Site URLs, SSH key
+│ ├── outputs.tf # Droplet IP, Site URL, SSH key
 │ └── cloud-init.sh # Docker install + creates project directory
-├── docker-compose.yml # Container orchestration (6 services)
+├── docker-compose.yml # Container orchestration (4 services)
 ├── docker-compose.shared.yml # Shared-mode overlay (disables Caddy, uses relay-net)
 ├── docker-compose.local.yml # Local dev override (direct port access, no TLS)
-├── docker-compose.test.yml # E2E test stack (ib-gateway + remote-client)
 ├── services/                  # Business-logic services (user-facing features)
 │   ├── shared/                    # Single source of truth for models + utilities
 │   │   └── __init__.py            # Fill, Trade, WebhookPayload, BuySell, OrderType, aggregate_fills()
-│   ├── remote-client/
-│   │   ├── Dockerfile
-│   │   ├── requirements.txt       # ib_async, aiohttp
-│   │   ├── main.py                # Entrypoint (connection + HTTP server)
-│   │   ├── rc_models.py           # Pydantic models (order API types)
-│   │   ├── client/                # IB Gateway client (namespace delegation)
-│   │   │   ├── __init__.py        # IBClient class (connection management)
-│   │   │   ├── orders.py          # OrdersNamespace (place orders)
-│   │   │   └── listener.py        # ListenerNamespace (real-time trade events → webhooks)
-│   │   ├── rc_routes/             # HTTP route handlers
-│   │   │   ├── __init__.py        # Route orchestrator (create_routes)
-│   │   │   ├── middlewares.py     # Auth middleware (Bearer token)
-│   │   │   ├── order_place.py     # POST /ibkr/order
-│   │   │   └── health.py          # GET /health
-│   │   └── tests/e2e/             # E2E tests (paper account)
-│   │       ├── conftest.py        # httpx fixtures
-│   │       ├── .env.test.example  # Template for paper credentials
-│   │       └── .env.test          # Your paper credentials (gitignored)
 │   ├── poller/
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt       # httpx, pydantic, aiohttp
+│   │   ├── main.py                # Entrypoint (polling loop + HTTP API)
+│   │   ├── poller_models.py       # Re-export shim (shared models + poller-specific API types)
+│   │   ├── poller/                # Core polling logic (package)
+│   │   │   ├── __init__.py        # SQLite dedup, Flex fetch, poll_once()
+│   │   │   ├── flex_parser.py     # Flex XML parser (Activity + Trade Confirmation)
+│   │   │   ├── test_flex_parser.py # Tests for flex_parser
+│   │   │   └── test_poller.py     # Tests for poller core logic
+│   │   └── poller_routes/         # HTTP API
+│   │       ├── __init__.py        # Route orchestrator (create_routes, start_api_server)
+│   │       ├── health.py          # GET /health handler
+│   │       ├── middlewares.py     # Auth middleware (Bearer token)
+│   │       ├── run.py             # POST /ibkr/poller/run handler
+│   │       └── test_middlewares.py # Tests for auth middleware
+│   ├── notifier/                  # Pluggable notification backends (library, no container)
+│   │   ├── __init__.py            # Registry, load_notifiers(), validate_notifier_env(), notify()
+│   │   ├── base.py                # BaseNotifier ABC
+│   │   └── webhook.py             # WebhookNotifier: HMAC-SHA256 signed HTTP POST
+│   ├── dedup/                     # Shared SQLite dedup library (library, no container)
+│   │   └── __init__.py            # init_db(), is_processed(), mark_processed(), get_processed_ids(), prune()
+│   └── debug/                     # Debug webhook inbox service
+│       ├── debug_app.py           # aiohttp app: POST/GET/DELETE /debug/webhook/{path}
 │       ├── Dockerfile
-│       ├── requirements.txt       # httpx, pydantic, aiohttp
-│       ├── main.py                # Entrypoint (polling loop + HTTP API)
-│       ├── poller_models.py       # Re-export shim (shared models + poller-specific API types)
-│       ├── poller/                # Core polling logic (package)
-│       │   ├── __init__.py        # SQLite dedup, Flex fetch, poll_once()
-│       │   ├── flex_parser.py     # Flex XML parser (Activity + Trade Confirmation)
-│       │   ├── test_flex_parser.py # Tests for flex_parser
-│       │   └── test_poller.py     # Tests for poller core logic
-│       └── poller_routes/         # HTTP API
-│           ├── __init__.py        # Route orchestrator (create_routes, start_api_server)
-│           ├── middlewares.py     # Auth middleware (Bearer token)
-│           └── run.py             # POST /ibkr/poller/run handler
-│   └── notifier/                  # Pluggable notification backends (library, no container)
-│       ├── __init__.py            # Registry, load_notifiers(), validate_notifier_env(), notify()
-│       ├── base.py                # BaseNotifier ABC
-│       └── webhook.py             # WebhookNotifier: HMAC-SHA256 signed HTTP POST
-│   └── dedup/                     # Shared SQLite dedup library (library, no container)
-│       └── __init__.py            # init_db(), is_processed(), mark_processed(), get_processed_ids(), prune()
+│       └── requirements.txt
 ├── infra/                         # Infrastructure backbone (no business logic)
-│   ├── caddy/
-│   │   ├── Caddyfile              # Reverse proxy config (VNC + Site domains)
-│   │   ├── sites/
-│   │   │   └── ibkr.caddy         # SITE_DOMAIN route handlers (handle /ibkr/*)
-│   │   └── domains/
-│   │       └── ibkr-vnc.caddy     # VNC_DOMAIN site block
-│   ├── novnc/
-│   │   └── index.html             # VNC web client (Start Gateway button)
-│   └── gateway-controller/
-│       ├── Dockerfile
-│       ├── start-gateway.sh       # CGI script to start ib-gateway
-│       └── gateway-status.sh      # CGI script to check ib-gateway status
+│   └── caddy/
+│       ├── Caddyfile              # Reverse proxy config (SITE_DOMAIN)
+│       └── sites/
+│           ├── ibkr.caddy         # SITE_DOMAIN route handlers (handle /ibkr/*)
+│           └── debug.caddy        # Debug webhook routes (handle /debug/webhook/*)
 └── types/                     # @tradegist/ibkr-relay-types npm package
-    ├── index.d.ts             # Barrel: exports IbkrPoller, IbkrHttp namespaces
+    ├── index.d.ts             # Barrel: exports Ibkr, IbkrPoller namespaces
     ├── package.json
-    ├── poller/                # IbkrPoller namespace
+    ├── shared/                # Ibkr namespace (CommonFill models)
     │   ├── index.d.ts
-    │   └── types.d.ts         # Generated from poller_models.py SCHEMA_MODELS
-    └── http/                  # IbkrHttp namespace
+    │   └── types.d.ts         # Generated from shared/__init__.py SCHEMA_MODELS
+    └── poller/                # IbkrPoller namespace
         ├── index.d.ts
-        └── types.d.ts         # Generated from rc_models.py SCHEMA_MODELS
+        └── types.d.ts         # Generated from poller_models.py SCHEMA_MODELS
 
 ```
 
@@ -736,105 +600,6 @@ Before deploying, create an Activity Flex Query in IBKR Client Portal:
 8. Go to **Flex Web Service Configuration** → enable and get the **Current Token** (use as `IBKR_FLEX_TOKEN`)
 
 > **Why Activity instead of Trade Confirmation?** Trade Confirmation queries are locked to "Today" only. Activity queries support a configurable lookback period, so if the droplet is offline for a few days the first poll after restart will catch all missed fills. The SQLite dedup prevents double-sending.
-
-## Gateway Management
-
-The IB Gateway session stays alive for approximately **one week** before IBKR forces re-authentication (2FA). You can safely **close the gateway** when you're not actively using the API — this lets you log in to the [IBKR Client Portal](https://portal.interactivebrokers.com) or mobile app normally (IBKR only allows one active session per user).
-
-When you need the API again, restart the gateway using either method:
-
-**From the command line:**
-
-```bash
-make gateway    # starts the container, then open vnc.example.com for 2FA
-```
-
-**From the browser:**
-
-1. Go to `vnc.example.com`
-2. The page detects the gateway is down and shows a **password field + Start Gateway** button
-3. Enter the VNC password and click **Start Gateway**
-4. The gateway starts and the VNC session connects automatically — complete 2FA when prompted
-
-If 2FA times out before you complete it, the gateway exits cleanly and stops (it will **not** restart in a loop). Use either method above to try again.
-
-## Placing Orders
-
-Place stock orders from your local machine. The CLI is a convenience wrapper for `POST /ibkr/order` — it only supports `secType: STK` (stocks/ETFs). For other security types, call the API directly.
-
-```bash
-# Buy 2 shares of TSLA at market
-python3 -m cli order 2 TSLA MKT
-
-# Sell 2 shares of TSLA at market
-python3 -m cli order -- -2 TSLA MKT
-
-# Buy 2 shares of TSLA with a limit at $352.50
-python3 -m cli order 2 TSLA LMT 352.5
-
-# Sell 2 shares of TSLA with a limit at $380
-python3 -m cli order -- -2 TSLA LMT 380
-
-# Buy a European ETF in EUR
-python3 -m cli order 10 CSPX LMT 590 EUR
-
-# Buy on a specific exchange
-python3 -m cli order 10 CSPX LMT 590 EUR LSE
-
-# Good-til-cancelled order
-python3 -m cli order 2 TSLA LMT 300 --tif GTC
-
-# Allow execution outside regular trading hours
-python3 -m cli order 2 TSLA LMT 300 --outside-rth
-```
-
-Or via `make`:
-
-```bash
-make order Q=2 SYM=TSLA T=MKT
-make order Q=-2 SYM=TSLA T=LMT P=380
-make order Q=10 SYM=CSPX T=LMT P=590 CUR=EUR
-make order Q=10 SYM=CSPX T=LMT P=590 CUR=EUR EX=LSE
-make order Q=2 SYM=TSLA T=LMT P=300 TIF=GTC
-make order Q=2 SYM=TSLA T=LMT P=300 RTH=1
-```
-
-Positive quantity = **BUY**, negative = **SELL**. The script calls `https://<SITE_DOMAIN>/ibkr/order` over HTTPS with Bearer token authentication.
-
-You can also call the API directly:
-
-```bash
-curl -X POST https://trade.example.com/ibkr/order \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <API_TOKEN>" \
-  -d '{"contract": {"symbol": "TSLA"}, "order": {"action": "BUY", "totalQuantity": 2, "orderType": "MKT"}}'
-```
-
-For non-US stocks or ETFs, pass `exchange` and `currency` in the `contract` object (default: `SMART` and `USD`):
-
-```bash
-curl -X POST https://trade.example.com/ibkr/order \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <API_TOKEN>" \
-  -d '{"contract": {"symbol": "CSPX", "exchange": "SMART", "currency": "EUR"}, "order": {"action": "BUY", "totalQuantity": 10, "orderType": "LMT", "lmtPrice": 590}}'
-```
-
-Example response:
-
-```json
-{
-  "status": "PreSubmitted",
-  "orderId": 8,
-  "action": "BUY",
-  "symbol": "TSLA",
-  "totalQuantity": 2,
-  "orderType": "MKT"
-}
-```
-
-**Order API** field names mirror `ib_async` exactly (e.g. `lmtPrice`, `totalQuantity`, `secType`, `tif`, `outsideRth`). See [`services/remote-client/rc_models.py`](services/remote-client/rc_models.py) for the full schema.
-
-> **Note**: The gateway must have `READ_ONLY_API=no` for orders to be accepted.
 
 ## On-Demand Poll
 
@@ -898,8 +663,6 @@ make resume
 - Snapshot: ~$0.06/GB/month (~$0.05/month for a fresh 25GB disk)
 - Reserved IP: **$5/month** while unassigned (free when assigned to a droplet)
 
-After resuming, you'll need to complete 2FA again via the VNC interface.
-
 ## SSH Access
 
 ```bash
@@ -911,9 +674,8 @@ make ssh
 Stream poller logs in real-time (useful for checking fill deliveries):
 
 ```bash
-make logs                    # droplet (default)
-make logs S=remote-client    # different service
-make logs S=ib-gateway       # gateway logs
+make logs                    # droplet (default: poller)
+make logs S=poller-2         # second poller
 make logs S=ibkr-debug       # debug inbox logs
 ```
 
@@ -926,33 +688,27 @@ make logs S=ibkr-debug       # local debug inbox (when DEFAULT_CLI_RELAY_ENV=loc
 
 ## Security
 
-- Firewall restricts SSH (22) and noVNC (6080) to the deployer's IP only
-- IBKR API ports are Docker-internal — never exposed to the internet
+- Firewall restricts SSH (22) to the deployer's IP only
+- HTTP/HTTPS open (Caddy auto-redirects HTTP → HTTPS)
 - Webhook payloads are HMAC-SHA256 signed
 - No credentials stored in the repository
-- VNC requires a password
 
 ## Current Status
 
 - [x] Terraform infrastructure (droplet, firewall, SSH key)
-- [x] Docker Compose orchestration (6 containers)
-- [x] Remote client connected to IB Gateway
-- [x] HTTP API for order placement (US + international stocks/ETFs)
+- [x] Docker Compose orchestration (4 containers)
 - [x] Flex poller with SQLite dedup + webhook delivery
 - [x] On-demand poll endpoint (`make poll` / HTTP API)
-- [x] Local deploy/destroy/pause/resume scripts
+- [x] Deploy/destroy/pause/resume scripts
 - [x] Dry-run mode (log payloads when no webhook URL)
 - [x] Webhook endpoint (HMAC-SHA256 signed, batched payloads)
 - [x] Pluggable notification backends (`services/notifier/`, currently: webhook)
-- [x] HTTPS via Caddy + Let's Encrypt (separate VNC/Trade domains)
-- [x] Makefile CLI (`make deploy`, `make order`, etc.)
-- [x] Gateway management (browser Start Gateway button + `make gateway`)
+- [x] HTTPS via Caddy + Let's Encrypt
+- [x] Makefile CLI (`make deploy`, `make poll`, etc.)
 - [x] Unified Flex XML parsing (Activity + Trade Confirmation)
 - [x] TypeScript type definitions (`@tradegist/ibkr-relay-types`, not yet published)
-- [x] E2E test infrastructure (Docker-based, paper account)
-- [x] Real-time listener (opt-in, `LISTENER_ENABLED`)
-- [x] Optional poller disable (`POLLER_ENABLED=false`)
-- [x] Optional gateway stack disable (`REMOTE_CLIENT_ENABLED=false`, poller-only mode)
+- [x] Optional second poller (`IBKR_FLEX_QUERY_ID_2`)
+- [x] Debug webhook inbox (`DEBUG_WEBHOOK_PATH`)
 - [ ] Health monitoring / alerting
 
 ## Flex XML Parsing
@@ -984,7 +740,7 @@ The poller supports both **Activity Flex Queries** (`<Trade>` tags) and **Trade 
   - `execIds` is an array of execution IDs (one per fill), so you can trace back to individual executions
   - `fillCount` is the number of fills in the group
 
-- **Deduplication** uses `execId` as the primary key. For Flex XML, `execId` is resolved via a fallback chain: `ibExecId` → `transactionId` → `tradeID`. `ibExecId` is preferred because it is the common identifier between Flex XML fills and real-time ib_async execution events, enabling cross-service dedup. Processed IDs are stored in a shared SQLite database (WAL mode) that both the poller and listener read/write concurrently.
+- **Deduplication** uses `execId` as the primary key. For Flex XML, `execId` is resolved via a fallback chain: `ibExecId` → `transactionId` → `tradeID`. `ibExecId` is preferred because it is the most specific identifier. Processed IDs are stored in a SQLite database (WAL mode).
 
 - **Parse errors never break the runtime.** Malformed rows are skipped and reported in the `errors` array. Bad float values default to `0.0`.
 
@@ -1012,64 +768,4 @@ IBKR uses different field names for the same identifiers across its APIs. This t
 - **Order level:** `permId` (TWS) ↔ `ibOrderID` (Flex AF) ↔ `orderID` (Flex TC)
 - **Fill level:** `execId` (TWS) ↔ `ibExecID` (Flex AF) ↔ `execID` (Flex TC)
 
-**This project's convention:** The permanent order ID (`permId` from ib_async) is exposed as `orderId` in all API responses (`PlaceOrderResponse`, `Trade`). The session-scoped `orderId` from ib_async is never exposed — it resets on reconnect and is useless for cross-session tracking. The execution/fill ID is exposed as `execId` on `Fill` and in the `execIds` array on `Trade`. The dedup key is `execId`, resolved via the fallback chain `ibExecId` → `transactionId` → `tradeID` at parse time.
-
-## Real-Time Listener
-
-The listener is an **opt-in** feature that subscribes to IB Gateway trade events and fires webhooks immediately when orders fill — no polling delay.
-
-### How it works
-
-When enabled, the remote-client subscribes to two ib_async events:
-
-- **`execDetailsEvent`** — fires when an execution occurs (fill price, quantity, exchange). Commission is not yet available.
-- **`commissionReportEvent`** — fires shortly after with commission and realized P&L.
-
-Each event produces a webhook with `Trade` objects. The `source` field indicates the origin:
-
-| Source                  | Commission | Latency        |
-| ----------------------- | ---------- | -------------- |
-| `execDetailsEvent`      | 0.0        | Instant        |
-| `commissionReportEvent` | Populated  | ~0.5s after    |
-| `flex`                  | Populated  | Minutes (poll) |
-
-`execDetailsEvent` is always dispatched immediately (no dedup, no debounce). `commissionReportEvent` is deduplicated by `execId` via the shared `services/dedup/` SQLite module — duplicates after reconnect are skipped.
-
-When **debounce** is enabled (`LISTENER_EVENT_DEBOUNCE_TIME` > 0), `commissionReportEvent` fills are buffered per `orderId` and aggregated into a single webhook per order. Each new fill resets the debounce timer. This is useful for orders that produce rapid partial fills — instead of N separate webhooks, you get one aggregated trade after the fills settle.
-
-The listener also prunes the shared dedup DB at startup and every 24 hours (30-day retention).
-
-### Enable
-
-Set `LISTENER_ENABLED` to any non-empty value in `.env` and configure at least one notifier backend:
-
-```env
-LISTENER_ENABLED=true
-NOTIFIERS=webhook
-TARGET_WEBHOOK_URL=https://example.com/webhook
-WEBHOOK_SECRET=your_hmac_secret_key
-```
-
-By default, only `commissionReportEvent` (confirmed fills with commission) fires webhooks. To also receive `execDetailsEvent` (preliminary fills without commission, lower latency but doubles webhook volume):
-
-```env
-LISTENER_EXEC_EVENTS_ENABLED=true
-```
-
-The listener reuses the same notifier configuration as the poller (`NOTIFIERS`, `TARGET_WEBHOOK_URL`, `WEBHOOK_SECRET`, etc.).
-
-### Dedup
-
-Both the listener and poller share the same SQLite dedup database at `DEDUP_DB_PATH` (default `/data/dedup/fills.db`) on a `dedup-data` Docker named volume. SQLite WAL mode with `timeout=5.0` enables safe concurrent access from both containers.
-
-A fill processed by the listener is automatically skipped by the next poll cycle, and vice versa. The dedup key is `execId` (resolved by the Flex parser via the `ibExecId` → `transactionId` → `tradeID` fallback chain; the listener uses `execId` from ib_async directly).
-
-The poller has a separate metadata DB at `META_DB_PATH` (default `/data/meta.db`) on a private `poller-data` volume for its timestamp watermark.
-
-### Field mapping
-
-The listener maps ib_async event objects to `Fill` via `_map_to_fill()`, then wraps them in `Trade` objects (via `_fill_to_trade()` for immediate dispatch, or `aggregate_fills()` when debouncing). The ib_async objects are not directly serializable, so the listener manually extracts fields from `Execution`, `CommissionReport`, `Order`, and `Contract` into a flat `raw` dict.
-
-Since listener events provide a different set of fields than Flex XML, the `raw` dict contains a smaller set (~15 keys vs ~100 for Flex). The CommonFill fields (`symbol`, `side`, `volume`, `price`, `orderId`, `execId`, `fee`, `timestamp`) are always populated. `orderType` is `None` for listener events (ib_async doesn't expose it at the fill level). `cost` is `0.0`.
-
-The `raw` keys for listener events: `ibExecId`, `orderId`, `side`, `quantity`, `price`, `symbol`, `assetCategory`, `exchange`, `currency`, `commission`, `commissionCurrency`, `fifoPnlRealized`, `dateTime`, `accountId`.
+**This project's convention:** The permanent order ID is exposed as `orderId` in `Trade` objects. The execution/fill ID is exposed as `execId` on `Fill` and in the `execIds` array on `Trade`. The dedup key is `execId`, resolved via the fallback chain `ibExecId` → `transactionId` → `tradeID` at parse time.

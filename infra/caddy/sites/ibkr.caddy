@@ -6,7 +6,3 @@ handle /ibkr/poller/2/* {
 handle /ibkr/poller/* {
     reverse_proxy poller:8000
 }
-
-handle /ibkr/* {
-    reverse_proxy remote-client:5000
-}

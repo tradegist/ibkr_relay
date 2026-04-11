@@ -21,14 +21,14 @@ disallow_untyped_defs = false
 disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
-testpaths = ["services/poller", "services/remote-client", "services/notifier", "services/dedup", "services/shared", "services/debug"]
+testpaths = ["services/poller", "services/notifier", "services/dedup", "services/shared", "services/debug"]
 norecursedirs = ["tests/e2e"]
 addopts = "--import-mode=importlib"
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-src = ["services/poller", "services/remote-client", "services/notifier", "services/dedup", "services/shared", "services/debug", "cli"]
+src = ["services/poller", "services/notifier", "services/dedup", "services/shared", "services/debug", "cli"]
 
 [tool.ruff.lint]
 select = [
@@ -49,8 +49,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Route tests must patch API_TOKEN before importing routes
-"services/remote-client/routes/test_*.py" = ["E402", "S101"]
 # CLI scripts use conditional imports and have looser style
 "cli/*.py" = ["E402", "F401", "RUF005"]
 "cli/core/*.py" = ["E402", "RUF005"]
@@ -61,6 +59,6 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = [
-    "client", "rc_routes", "poller_routes", "poller", "notifier", "shared", "dedup", "debug",
-    "poller_models", "rc_models",
+    "poller_routes", "poller", "notifier", "shared", "dedup", "debug",
+    "poller_models",
 ]

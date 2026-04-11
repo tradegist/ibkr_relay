@@ -3,11 +3,6 @@ output "droplet_ip" {
   value       = digitalocean_reserved_ip.relay.ip_address
 }
 
-output "vnc_url" {
-  description = "noVNC URL for browser-based 2FA access"
-  value       = "https://${var.vnc_domain}"
-}
-
 output "site_url" {
   description = "Site base URL"
   value       = "https://${var.site_domain}"

@@ -3,41 +3,6 @@
 # See Makefile E2E_COMPOSE for the full invocation.
 
 services:
-  ib-gateway:
-    restart: "no"
-
-  remote-client:
-    restart: "no"
-    environment:
-      API_TOKEN: test-token
-      LISTENER_ENABLED: "true"
-      LISTENER_EXEC_EVENTS_ENABLED: "true"
-      LISTENER_EVENT_DEBOUNCE_TIME: "2000"
-      NOTIFIERS: webhook
-      WEBHOOK_SECRET: test-webhook-secret
-      DEBUG_WEBHOOK_PATH: test-debug-path
-      PYTHONPATH: /opt:/opt/poller-models
-    ports:
-      - "15010:5000"
-    volumes:
-      - ./services/remote-client:/app
-      - ./services/notifier:/opt/notifier
-      - ./services/dedup:/opt/dedup
-      - ./services/shared:/opt/shared
-      - ./services/poller/poller_models.py:/opt/poller-models/poller_models.py:ro
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')",
-        ]
-      interval: 3s
-      timeout: 5s
-      retries: 20
-      start_period: 10s
-
   poller:
     restart: "no"
     environment:
@@ -91,9 +56,5 @@ services:
       start_period: 3s
 
   # Disable production-only services
-  novnc:
-    profiles: ["disabled"]
   caddy:
-    profiles: ["disabled"]
-  gateway-controller:
     profiles: ["disabled"]
