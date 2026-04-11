@@ -30,6 +30,7 @@ This project bundles everything into a single `make deploy` that provisions a Di
   - [Debug Webhook Inbox](#debug-webhook-inbox)
 - [Flex Web Service Setup](#flex-web-service-setup)
 - [On-Demand Poll](#on-demand-poll)
+- [Real-Time Listener](#real-time-listener)
 - [Commands](#commands)
 - [Pause & Resume](#pause--resume)
 - [Security](#security)
@@ -692,6 +693,45 @@ curl -s -X POST "https://trade.example.com/ibkr/poller/run" \
   -d '{"ibkr_flex_token": "abc", "ibkr_flex_query_id": "123"}' \
   | python3 -m json.tool
 ```
+
+## Real-Time Listener
+
+The relay includes an optional real-time listener that subscribes to [ibkr_bridge](https://github.com/tradegist/ibkr_bridge)'s WebSocket event stream for near-instant fill delivery — complementing the Flex poller (which runs every 10 minutes by default).
+
+> **Prerequisite:** A running [ibkr_bridge](https://github.com/tradegist/ibkr_bridge) instance is required. The listener authenticates via the same `API_TOKEN` used for ibkr_bridge's HTTP API.
+
+### Enabling the listener
+
+Add the following to `.env`:
+
+```env
+LISTENER_ENABLED=true
+BRIDGE_WS_URL=ws://bridge:5000/ibkr/ws/events   # same-droplet
+# BRIDGE_WS_URL=wss://trade.example.com/ibkr/ws/events  # cross-droplet (TLS)
+BRIDGE_API_TOKEN=your_bridge_api_token            # must match bridge's API_TOKEN
+```
+
+Then run `make sync` to push the config and restart the `poller` container.
+
+### Event types
+
+The listener processes two event types from the bridge stream:
+
+| Event                  | Default    | Description                                                                                                       |
+| ---------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------- |
+| `commissionReportEvent`| **enabled**| Fired after commission is confirmed — contains the final fill with fee data. This is the primary fill event.      |
+| `execDetailsEvent`     | disabled   | Fired immediately on execution — no commission data yet. Enable with `LISTENER_EXEC_EVENTS_ENABLED=true` for sub-second latency at the cost of 2× webhook volume (one preliminary + one confirmed per fill). |
+
+### Operational notes
+
+- **Only the primary `poller` service runs the listener.** The optional second poller (`poller-2`) does not start a listener — it uses the Flex poller only. This avoids double-delivery when both poller instances share the same IBKR account.
+- **Dedup is shared with the Flex poller.** Both the listener and the Flex poller write to the same SQLite dedup database (`DEDUP_DB_PATH`). A fill delivered by the listener will be silently skipped if the Flex poller later sees the same `execId`, and vice versa.
+- **Auto-reconnect with backoff.** On disconnect or error the listener waits (starting at 5 s, up to 5 min) and reconnects automatically. The last seen sequence number is sent on reconnect so the bridge can replay any missed events.
+- **Debounce (optional).** Set `LISTENER_EVENT_DEBOUNCE_TIME` (milliseconds, default `0`) to buffer rapid partial fills before dispatching a single batched webhook. Useful when a large order fills in many small lots within a short window.
+
+### Disabling the listener
+
+Remove or comment out `LISTENER_ENABLED` (or set it to `false`) and run `make sync`. The listener task is not started on the next container restart.
 
 ## Pause & Resume
 
