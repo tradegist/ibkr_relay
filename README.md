@@ -554,8 +554,10 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 │   │   │   └── test_poller.py     # Tests for poller core logic
 │   │   └── poller_routes/         # HTTP API
 │   │       ├── __init__.py        # Route orchestrator (create_routes, start_api_server)
+│   │       ├── health.py          # GET /health handler
 │   │       ├── middlewares.py     # Auth middleware (Bearer token)
-│   │       └── run.py             # POST /ibkr/poller/run handler
+│   │       ├── run.py             # POST /ibkr/poller/run handler
+│   │       └── test_middlewares.py # Tests for auth middleware
 │   ├── notifier/                  # Pluggable notification backends (library, no container)
 │   │   ├── __init__.py            # Registry, load_notifiers(), validate_notifier_env(), notify()
 │   │   ├── base.py                # BaseNotifier ABC

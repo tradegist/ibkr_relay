@@ -13,6 +13,7 @@
 - **Centralise env var reads into typed getter functions.** Each env var must be read in exactly one place — a getter function in the module that owns it (e.g. `get_flex_token()` in `poller/__init__.py`). The getter applies `.strip()` and any type conversion (`int()`, boolean parsing). All other code — including other modules, `main.py` entrypoints, and route handlers — imports and calls the getter. Never call `os.environ.get()` inline except inside a getter. This eliminates duplicated reads, inconsistent `.strip()`, and scattered default values.
 - **Getters must validate and fail fast.** Every getter that reads an env var must validate the value and raise `SystemExit` with a descriptive message on invalid input — never let a bad value propagate silently. For required string vars (no default), check emptiness: `if not val: raise SystemExit("IBKR_FLEX_TOKEN must be set")`. For `int()` conversions, wrap in `try/except ValueError: raise SystemExit(f"Invalid VAR={raw!r} — must be an integer")`. For boolean flags, parse inside the getter (`flag not in ("0", "false", "no")`) and return `bool`. Callers should never need to validate a getter's return value — if the getter returns, the value is valid.
 - **Prefer pure functions over side-effect functions.** Never write an `apply_*()` / `set_*()` function that silently mutates system state (env vars, globals, module-level caches) as its primary purpose. Instead, compute and return the value — let the caller decide how to use it. For example, instead of `apply_debug_url_override()` that mutates `os.environ`, write a `resolve_url()` that returns the URL and let the consumer store it. If a side-effect function is truly unavoidable (e.g. one-time DB migration), add an inline comment at every call site explaining **what** is mutated and **why**: `# Mutates os.environ["X"] to enable Y`.
+- **Never bulk-set `os.environ` with empty-string fallbacks.** A loop like `os.environ[key] = env(name, "")` silently overrides downstream defaults (e.g. Terraform `variable` defaults, library config) with empty strings — the downstream system sees the variable as *set but empty* instead of *unset*, which breaks `tonumber()`, validation blocks, and non-string parsing. When bridging env vars to another system (Terraform `TF_VAR_*`, subprocess env, etc.), only export a key when the source value is present and non-empty. Explicitly `os.environ.pop(key, None)` otherwise so stale values from a previous run don't leak through.
 
 ## Security Rules (MANDATORY)
 
@@ -61,7 +62,7 @@
 - **Use `log.exception()` for unexpected errors.** It automatically includes the traceback at `ERROR` level. Reserve `log.error()` for known/expected failure conditions where a traceback would be noise.
 - **Distinguish recoverable from fatal errors.** Recoverable errors (network timeout, temporary API failure) should be logged and retried or skipped. Fatal errors (missing required config, corrupted state) should fail fast with `raise SystemExit(msg)` or `die()` and a clear message — do not attempt to limp along.
 - **`SystemExit` must carry a descriptive message.** Never `raise SystemExit(1)` — callers that catch `SystemExit` (e.g. `validate_notifier_env()`) lose all context about what failed. Always `raise SystemExit("Notifier 'webhook' requires env vars: WEBHOOK_SECRET")` so the message can be surfaced to the user. Log the error at the raise site as well.
-- **Env var parsing must fail fast, not fall back silently.** When parsing an env var with `int()`, `float()`, or similar, wrap in `try/except ValueError` and `raise SystemExit(f"Invalid VAR={raw!r} — must be an integer")`. Never silently fall back to a default on parse failure — that hides config mistakes. Falling back is only appropriate for *missing* env vars (where the default is the intended behavior), not for *invalid* values.
+- **Env var parsing must fail fast, not fall back silently.** When parsing an env var with `int()`, `float()`, or similar, wrap in `try/except ValueError` and `raise SystemExit(f"Invalid VAR={raw!r} — must be an integer")`. Never silently fall back to a default on parse failure — that hides config mistakes. Falling back is only appropriate for _missing_ env vars (where the default is the intended behavior), not for _invalid_ values.
 - **Validate at system boundaries, trust internally.** Validate all external inputs (API payloads, env vars, webhook data, Flex XML responses) at the point of entry. Once validated, internal code should not re-validate — the type system and Pydantic models carry the guarantees.
 - **Never assume a default for financial enum fields.** When mapping external data to a constrained set (e.g. buy/sell side, order type), validate that the value is an exact match. Never use an `else` branch that silently assigns a default — e.g. `BuySell.BUY if x == "buy" else BuySell.SELL` treats _any_ non-buy value (including typos, nulls, and garbage) as SELL. Always check every valid value explicitly and raise/error on unknown input. This applies to all trade direction, order type, asset class, and similar mappings.
 - **`fee` is always positive (amount paid).** This is the industry standard (FIX protocol, Alpaca, Coinbase, Kraken). IBKR Flex XML reports commissions as negative numbers (`ibCommission="-0.62"`); the parser normalizes with `abs()` so `Fill.fee` and `Trade.fee` always represent the positive amount paid. Never store or forward negative fee values — consumers should not need to guess the sign convention.
@@ -122,12 +123,12 @@
 
 Four Docker containers in a single Compose stack on a DigitalOcean droplet:
 
-| Service         | Role                                                                                                                                              |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `caddy`         | Reverse proxy with automatic HTTPS (Let's Encrypt)                                                                                                |
-| `poller`        | Polls IBKR Flex for trade confirmations, fires webhooks. Disabled via `POLLER_ENABLED=false`                                                      |
-| `poller-2`      | Optional second poller instance for a different IBKR account. Behind `poller2` profile                                                            |
-| `ibkr-debug`    | Debug webhook inbox — captures webhook payloads for inspection. Disabled by default (`DEBUG_REPLICAS=0`), enabled when `DEBUG_WEBHOOK_PATH` is set |
+| Service      | Role                                                                                                                                               |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `caddy`      | Reverse proxy with automatic HTTPS (Let's Encrypt)                                                                                                 |
+| `poller`     | Polls IBKR Flex for trade confirmations, fires webhooks. Disabled via `POLLER_ENABLED=false`                                                       |
+| `poller-2`   | Optional second poller instance for a different IBKR account. Behind `poller2` profile                                                             |
+| `ibkr-debug` | Debug webhook inbox — captures webhook payloads for inspection. Disabled by default (`DEBUG_REPLICAS=0`), enabled when `DEBUG_WEBHOOK_PATH` is set |
 
 All secrets are injected via `.env` → `environment` in `docker-compose.yml`.
 Caddy reads `SITE_DOMAIN` from env vars — the Caddyfile uses `{$SITE_DOMAIN}` syntax.
@@ -206,6 +207,7 @@ The deployment mode is controlled by `DEPLOY_MODE` in `.env` (required, validate
   - **`@patch(...)`** decorator — for single-test or single-class patches.
   - Never use bare `_patcher.start()` without registering a `.stop()`.
 - **Use `setUpModule()` / `tearDownModule()` for env var overrides.** When tests need specific `os.environ` values, save originals in `setUpModule()` and restore in `tearDownModule()`. Never mutate `os.environ` at module level without cleanup — the mutation leaks into every test module that runs afterward. The pattern:
+
   ```python
   _ORIG_ENV: dict[str, str | None] = {}
   _TEST_ENV = {"MY_VAR": "test-value"}
@@ -222,7 +224,9 @@ The deployment mode is controlled by `DEPLOY_MODE` in `.env` (required, validate
           else:
               os.environ[key] = orig
   ```
+
   Both functions are called automatically by pytest/unittest — no manual invocation needed. Prefer this over `mock.patch.dict(os.environ, ...)` when the env vars must be set for the entire module (e.g. all test classes). For single-test env changes, use `with mock.patch.dict(os.environ, ...):` instead.
+
 - **Avoid reading env vars at module level in production code.** Module-level `os.environ` reads (e.g. `DEBUG_PATH = os.environ.get(...)`) bake values at import time, forcing tests to set env vars before imports — a fragile anti-pattern. Defer env reads to a factory function (e.g. `create_app()`) or constructor so tests can set env vars normally in `setUpModule()` and get fresh reads on each call.
 - **No cross-test dependencies.** Every test must be self-contained — it must not rely on state created by a previous test. Pytest does not guarantee execution order, and tests may run selectively or in parallel. If a test needs preconditions, create them within the test itself or via an explicit fixture.
 - **E2E conftest fixtures must use `yield` with a context manager.** Never `return httpx.Client(...)` — the client is never closed and leaks sockets. Use `with httpx.Client(...) as client: yield client` instead. Scope to `session` (one client per test run). Every E2E `conftest.py` must also include a `_preflight_check` fixture (`scope="session"`, `autouse=True`) that hits `/health` and calls `pytest.exit()` if the stack is unreachable.
@@ -242,8 +246,10 @@ services/poller/
     test_poller.py         # Tests for poller core logic
   poller_routes/            # HTTP API
     __init__.py            # Orchestrator: create_routes(), start_api_server()
+    health.py              # GET /health handler
     middlewares.py         # Auth middleware (Bearer token)
     run.py                 # POST /ibkr/poller/run handler
+    test_middlewares.py    # Tests for auth middleware
   tests/e2e/               # E2E tests (poller smoke + toggle)
     conftest.py            # httpx fixtures (api + anon_api)
     test_smoke.py          # Health + auth smoke tests
@@ -318,10 +324,10 @@ services/dedup/
 
 This project has **two model locations** — a shared source of truth and one service-specific file:
 
-| File                                             | Domain                | Contains                                                                                                                                      |
-| ------------------------------------------------ | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `services/shared/__init__.py`                    | CommonFill (outbound) | `Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `aggregate_fills()`, `_dedup_id()` |
-| `services/poller/poller_models.py`               | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                                                                |
+| File                               | Domain                | Contains                                                                                                                                      |
+| ---------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `services/shared/__init__.py`      | CommonFill (outbound) | `Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `aggregate_fills()`, `_dedup_id()` |
+| `services/poller/poller_models.py` | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                                                                |
 
 - **`services/shared/__init__.py`** is the single source of truth for all webhook payload models.
 - **Model shims only re-export models and types** (Pydantic models, enums, type aliases). Utility functions (`aggregate_fills`, `normalize_order_type`, `_dedup_id`) must be imported directly from the owning module: `from shared import aggregate_fills`. Never re-export functions through model shims.
