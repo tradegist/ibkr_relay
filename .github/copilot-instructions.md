@@ -13,7 +13,7 @@
 - **Centralise env var reads into typed getter functions.** Each env var must be read in exactly one place — a getter function in the module that owns it (e.g. `get_flex_token()` in `poller/__init__.py`). The getter applies `.strip()` and any type conversion (`int()`, boolean parsing). All other code — including other modules, `main.py` entrypoints, and route handlers — imports and calls the getter. Never call `os.environ.get()` inline except inside a getter. This eliminates duplicated reads, inconsistent `.strip()`, and scattered default values.
 - **Getters must validate and fail fast.** Every getter that reads an env var must validate the value and raise `SystemExit` with a descriptive message on invalid input — never let a bad value propagate silently. For required string vars (no default), check emptiness: `if not val: raise SystemExit("IBKR_FLEX_TOKEN must be set")`. For `int()` conversions, wrap in `try/except ValueError: raise SystemExit(f"Invalid VAR={raw!r} — must be an integer")`. For boolean flags, parse inside the getter (`flag not in ("0", "false", "no")`) and return `bool`. Callers should never need to validate a getter's return value — if the getter returns, the value is valid.
 - **Prefer pure functions over side-effect functions.** Never write an `apply_*()` / `set_*()` function that silently mutates system state (env vars, globals, module-level caches) as its primary purpose. Instead, compute and return the value — let the caller decide how to use it. For example, instead of `apply_debug_url_override()` that mutates `os.environ`, write a `resolve_url()` that returns the URL and let the consumer store it. If a side-effect function is truly unavoidable (e.g. one-time DB migration), add an inline comment at every call site explaining **what** is mutated and **why**: `# Mutates os.environ["X"] to enable Y`.
-- **Never bulk-set `os.environ` with empty-string fallbacks.** A loop like `os.environ[key] = env(name, "")` silently overrides downstream defaults (e.g. Terraform `variable` defaults, library config) with empty strings — the downstream system sees the variable as *set but empty* instead of *unset*, which breaks `tonumber()`, validation blocks, and non-string parsing. When bridging env vars to another system (Terraform `TF_VAR_*`, subprocess env, etc.), only export a key when the source value is present and non-empty. Explicitly `os.environ.pop(key, None)` otherwise so stale values from a previous run don't leak through.
+- **Never bulk-set `os.environ` with empty-string fallbacks.** A loop like `os.environ[key] = env(name, "")` silently overrides downstream defaults (e.g. Terraform `variable` defaults, library config) with empty strings — the downstream system sees the variable as _set but empty_ instead of _unset_, which breaks `tonumber()`, validation blocks, and non-string parsing. When bridging env vars to another system (Terraform `TF_VAR_*`, subprocess env, etc.), only export a key when the source value is present and non-empty. Explicitly `os.environ.pop(key, None)` otherwise so stale values from a previous run don't leak through.
 
 ## Security Rules (MANDATORY)
 
@@ -318,22 +318,23 @@ services/dedup/
 - **`get_processed_ids(conn, exec_ids)`** — batch check (used by poller).
 - **`mark_processed_batch(conn, exec_ids)`** — batch mark (used by poller).
 - **`prune(conn, days=30)`** — delete old entries.
-- **Dedup key priority** — `ibExecId → transactionId → tradeID`, resolved in `services/poller/poller/flex_parser.py` at parse time by setting `Fill.execId`. `services/shared/__init__.py::_dedup_id()` simply returns the already-resolved `fill.execId`.
+- **Dedup key priority** — `ibExecId → transactionId → tradeID`, resolved in `services/poller/poller/flex_parser.py` at parse time by setting `Fill.execId`. `services/shared/utilities.py::_dedup_id()` simply returns the already-resolved `fill.execId`.
 - The poller has a separate metadata DB at `META_DB_PATH` (default `/data/meta.db`) on a `poller-data` volume for the timestamp watermark. The poller's `init_dedup_db()` wraps `dedup.init_db()`; `init_meta_db()` manages the metadata table independently.
 
 ## Models (Two Locations)
 
 This project has **two model locations** — a shared source of truth and one service-specific file:
 
-| File                               | Domain                | Contains                                                                                                                                      |
-| ---------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `services/shared/__init__.py`      | CommonFill (outbound) | `Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `aggregate_fills()`, `_dedup_id()` |
-| `services/poller/poller_models.py` | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                                                                |
+| File                               | Domain                | Contains                                                                                                  |
+| ---------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------- |
+| `services/shared/models.py`        | CommonFill (outbound) | `Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`, `AssetClass`, `OrderType`, `Source` |
+| `services/poller/poller_models.py` | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                            |
 
-- **`services/shared/__init__.py`** is the single source of truth for all webhook payload models.
+- **`services/shared/models.py`** is the single source of truth for all webhook payload models. The `__init__.py` barrel re-exports everything so `from shared import Fill` keeps working.
+- **`services/shared/utilities.py`** contains internal helpers (`aggregate_fills`, `normalize_order_type`, `normalize_asset_class`, `_dedup_id`). These are not exported to consumer packages.
 - **Model shims only re-export models and types** (Pydantic models, enums, type aliases). Utility functions (`aggregate_fills`, `normalize_order_type`, `_dedup_id`) must be imported directly from the owning module: `from shared import aggregate_fills`. Never re-export functions through model shims.
 - `poller_models.py` re-exports shared models and defines poller-specific API types. Its `SCHEMA_MODELS` contains only `[RunPollResponse, HealthResponse]`.
-- `shared/__init__.py` defines `SCHEMA_MODELS = [WebhookPayloadTrades, Trade, Fill]` for the shared types.
+- `shared/models.py` defines `SCHEMA_MODELS = [WebhookPayloadTrades, Trade, Fill]` for the shared types. The barrel `__init__.py` re-exports it for `schema_gen.py`.
 - All external-contract models use `ConfigDict(extra="forbid")` for strict validation.
 
 ## TypeScript Types
@@ -342,10 +343,10 @@ This project has **two model locations** — a shared source of truth and one se
 
 All relay projects export TypeScript types using a two-tier namespace pattern:
 
-- **`types/shared/`** → exported as the **relay's primary namespace** (named after the exchange: `Ibkr`, `Kraken`, etc.). Contains the CommonFill models (`Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`) generated from `services/shared/__init__.py` SCHEMA_MODELS. Every relay has this.
-- **`types/<module>/`** → exported as **`<RelayName><ModuleName>`** (e.g. `IbkrPoller`). Contains service-specific types generated from that module's `SCHEMA_MODELS`. Only created when a service has unique types not in shared.
+- **`types/typescript/shared/`** → exported as the **relay's primary namespace** (named after the exchange: `Ibkr`, `Kraken`, etc.). Contains the CommonFill models (`Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`) generated from `services/shared/__init__.py` SCHEMA_MODELS. Every relay has this.
+- **`types/typescript/<module>/`** → exported as **`<RelayName><ModuleName>`** (e.g. `IbkrPoller`). Contains service-specific types generated from that module's `SCHEMA_MODELS`. Only created when a service has unique types not in shared.
 
-The barrel `types/index.d.ts` ties them together:
+The barrel `types/typescript/index.d.ts` ties them together:
 
 ```ts
 import * as Ibkr from "./shared";
@@ -361,27 +362,53 @@ export * as Kraken from "./shared";
 
 ### IBKR Relay Types
 
-- Types are published as `@tradegist/ibkr-relay-types` (npm package in `types/`, not yet published).
+- Types are published as `@tradegist/ibkr-relay-types` (npm package in `types/typescript/`, not yet published).
 - **Two namespaces**: `Ibkr` (shared webhook payload types) and `IbkrPoller` (poller-specific API types).
 - **`make types`** regenerates both from Pydantic models:
-  - `services/shared/__init__.py` → `types/shared/types.d.ts` (CommonFill models: WebhookPayloadTrades, Trade, Fill, BuySell)
-  - `services/poller/poller_models.py` → `types/poller/types.d.ts` (poller-specific: RunPollResponse, HealthResponse)
+  - `services/shared/__init__.py` → `types/typescript/shared/types.d.ts` (CommonFill models: WebhookPayloadTrades, Trade, Fill, BuySell)
+  - `services/poller/poller_models.py` → `types/typescript/poller/types.d.ts` (poller-specific: RunPollResponse, HealthResponse)
+  - `services/shared/models.py` → `types/python/ibkr_relay_types/shared.py` (Python, via `gen_python_types.py`)
+  - `services/poller/poller_models.py` → `types/python/ibkr_relay_types/poller.py` (Python, via `gen_python_types.py`)
 - **Structure:**
   ```
   types/
-    index.d.ts                 # Barrel: exports Ibkr, IbkrPoller namespaces
-    package.json               # @tradegist/ibkr-relay-types
-    shared/
-      index.d.ts               # Re-exports: BuySell, Fill, Trade, WebhookPayloadTrades, WebhookPayload
-      types.d.ts               # Generated from shared/__init__.py (SCHEMA_MODELS)
-      types.schema.json         # Intermediate JSON Schema
-    poller/
-      index.d.ts               # Re-exports: RunPollResponse, HealthResponse
-      types.d.ts               # Generated from poller/poller_models.py (SCHEMA_MODELS)
-      types.schema.json         # Intermediate JSON Schema
+    typescript/
+      index.d.ts                 # Barrel: exports Ibkr, IbkrPoller namespaces
+      package.json               # @tradegist/ibkr-relay-types
+      shared/
+        index.d.ts               # Re-exports: BuySell, Fill, Trade, WebhookPayloadTrades, WebhookPayload
+        types.d.ts               # Generated from shared/__init__.py (SCHEMA_MODELS)
+        types.schema.json         # Intermediate JSON Schema
+      poller/
+        index.d.ts               # Re-exports: RunPollResponse, HealthResponse
+        types.d.ts               # Generated from poller/poller_models.py (SCHEMA_MODELS)
+        types.schema.json         # Intermediate JSON Schema
+    python/
+      pyproject.toml             # ibkr-relay-types, deps: pydantic
+      ibkr_relay_types/
+        __init__.py              # Re-exports all public types
+        shared.py                # CommonFill models (generated from shared/__init__.py)
+        poller.py                # Poller API types (generated from poller_models.py)
   ```
 - **Usage:** `import { Ibkr, IbkrPoller } from "@tradegist/ibkr-relay-types"`
-- Each model file declares a `SCHEMA_MODELS` list at the bottom — `schema_gen.py` reads it to generate the JSON Schema. **To export a new model to TypeScript, append it to `SCHEMA_MODELS` in the relevant model shim (`poller_models.py`) or `shared/__init__.py` file and update the corresponding `types/*/index.d.ts` re-exports.**
+- Each model file declares a `SCHEMA_MODELS` list at the bottom — `schema_gen.py` reads it to generate the JSON Schema. **To export a new model to TypeScript, append it to `SCHEMA_MODELS` in the relevant model shim (`poller_models.py`) or `shared/__init__.py` file and update the corresponding `types/typescript/*/index.d.ts` re-exports.** The Python types package is auto-generated by `gen_python_types.py`.
+
+## Python Types Package
+
+- Types are available as `ibkr-relay-types` (PyPI package in `types/python/`, not yet published).
+- **Standalone Pydantic models** — no dependency on the poller service.
+- Exports the **same public types** as the TypeScript package: CommonFill models and poller API types.
+- **Structure:**
+  ```
+  types/python/
+    pyproject.toml              # ibkr-relay-types, deps: pydantic
+    ibkr_relay_types/
+      __init__.py               # Re-exports all public types
+      shared.py                 # CommonFill models (generated from shared/__init__.py public section)
+      poller.py                 # Poller API types (generated from poller_models.py)
+  ```
+- **Usage:** `from ibkr_relay_types import Fill, Trade, WebhookPayload, BuySell`
+- **Auto-generated** — `shared.py` extracts from `shared/models.py` (stripping docstring and `SCHEMA_MODELS`). `poller.py` copies `poller_models.py` with imports rewritten from `shared` to `.shared`. Run `make types` to regenerate. Do not edit these files manually.
 
 ## Code Style
 
@@ -454,11 +481,18 @@ services/               # Business-logic services (user-facing features)
   notifier/             # Pluggable notification backends (library, no container)
   dedup/                # SQLite dedup library (library, no container)
   shared/               # Shared models and utilities (library, no container)
+    __init__.py         # Barrel: re-exports models + utilities
+    models.py           # Pydantic models and type aliases (public contract)
+    utilities.py        # Internal helpers (aggregate_fills, normalize_*, _dedup_id)
 infra/                  # Infrastructure backbone (no business logic)
   caddy/Caddyfile       # Reverse proxy config (uses env vars for domains)
   caddy/sites/          # Route snippets imported inside {$SITE_DOMAIN}
     ibkr.caddy          # /ibkr/* routes (poller)
     debug.caddy         # /debug/webhook/* → ibkr-debug:9000
-types/                  # @tradegist/ibkr-relay-types npm package (Ibkr + IbkrPoller namespaces)
+types/                  # Type packages (TypeScript + Python)
+  typescript/            # @tradegist/ibkr-relay-types npm package (Ibkr + IbkrPoller namespaces)
+  python/                # ibkr-relay-types PyPI package
+schema_gen.py           # JSON Schema generator (Pydantic → TS types)
+gen_python_types.py     # Python types generator (shared/models.py + poller_models.py → types/python/)
 terraform/              # Infrastructure as code (DigitalOcean)
 ```
