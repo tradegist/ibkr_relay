@@ -5,12 +5,17 @@ Broker adapters provide callbacks; the engines handle orchestration
 """
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from notifier.base import BaseNotifier
 from shared import Fill, RelayName
+
+# Type alias for dispatch handlers passed to on_message.
+# The adapter calls send_and_mark(fill) for full pipeline (dedup + notify + mark)
+# or send_no_mark(fill) for fire-and-forget dispatch.
+FillHandler = Callable[[Fill], Awaitable[None]]
 
 # ── Poller configuration ─────────────────────────────────────────────
 
@@ -36,17 +41,20 @@ class ListenerConfig:
 
     *ws_url*: WebSocket endpoint to connect to.
     *api_token*: Bearer token for WS auth.
-    *on_message*: parse a raw WS JSON dict into a Fill (or None to skip).
+    *on_message*: async callback receiving (data, send_and_mark, send_no_mark).
+        The adapter parses the raw WS JSON dict, builds a Fill, and calls
+        the appropriate handler — ``send_and_mark`` for full pipeline
+        (dedup + notify + mark) or ``send_no_mark`` for fire-and-forget.
     *event_filter*: return True if the event should be processed, False to skip.
-    *exec_events_enabled*: whether preliminary exec events fire webhooks.
     *debounce_ms*: milliseconds to buffer fills before flushing (0 = disabled).
     """
 
     ws_url: str
     api_token: str
-    on_message: Callable[[dict[str, Any]], Fill | None]
+    on_message: Callable[
+        [dict[str, Any], FillHandler, FillHandler], Awaitable[None]
+    ]
     event_filter: Callable[[dict[str, Any]], bool]
-    exec_events_enabled: bool = False
     debounce_ms: int = 0
 
 
