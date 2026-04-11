@@ -60,12 +60,13 @@ poll2: ## Trigger an immediate Flex poll (second poller, ENV=local)
 test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2] [ENV=local])
 	$(CLI_RELAY_ENV) $(PYTHON) -m cli test-webhook $(S)
 
-types: ## Regenerate TypeScript types from Pydantic models
-	PYTHONPATH=services $(PYTHON) schema_gen.py shared > types/shared/types.schema.json
-	npx --yes json-schema-to-typescript types/shared/types.schema.json > types/shared/types.d.ts
-	PYTHONPATH=services/poller:services $(PYTHON) schema_gen.py poller_models > types/poller/types.schema.json
-	npx --yes json-schema-to-typescript types/poller/types.schema.json > types/poller/types.d.ts
-	@echo "Generated types/shared/types.d.ts + types/poller/types.d.ts"
+types: ## Regenerate TypeScript + Python types from Pydantic models
+	PYTHONPATH=services $(PYTHON) schema_gen.py shared > types/typescript/shared/types.schema.json
+	npx --yes json-schema-to-typescript types/typescript/shared/types.schema.json > types/typescript/shared/types.d.ts
+	PYTHONPATH=services/poller:services $(PYTHON) schema_gen.py poller_models > types/typescript/poller/types.schema.json
+	npx --yes json-schema-to-typescript types/typescript/poller/types.schema.json > types/typescript/poller/types.d.ts
+	@echo "Generated types/typescript/shared/types.d.ts + types/typescript/poller/types.d.ts"
+	$(PYTHON) gen_python_types.py
 
 test: ## Run unit tests
 	PYTHONPATH=.:services/poller:services:services/debug $(PYTHON) -m pytest -v
@@ -77,9 +78,12 @@ typecheck: ## Run mypy strict type checking
 	MYPYPATH=services $(PYTHON) -m mypy services/shared/
 	MYPYPATH=services/debug $(PYTHON) -m mypy services/debug/
 	$(PYTHON) -m mypy schema_gen.py
+	$(PYTHON) -m mypy gen_python_types.py
+	$(PYTHON) -m mypy types/python/ibkr_relay_types/
 
 lint: ## Run ruff linter (use FIX=1 to auto-fix)
-	$(PYTHON) -m ruff check services/poller/ services/notifier/ services/dedup/ services/shared/ services/debug/ cli/ schema_gen.py $(if $(FIX),--fix)
+	$(PYTHON) -m ruff check services/poller/ services/notifier/ services/dedup/ services/shared/ services/debug/ cli/ schema_gen.py gen_python_types.py types/python/ibkr_relay_types/ $(if $(FIX),--fix)
+	@if grep -rn '__all__' services/ types/ cli/ --include='*.py'; then echo "ERROR: __all__ is banned — use explicit re-exports"; exit 1; fi
 
 local-up: ## Start full stack locally (no TLS, direct port access)
 	@if [ -f .env ]; then \
