@@ -1,5 +1,10 @@
 """Re-export shared models + poller-specific API types.
 
+!! PUBLIC CONTRACT — every type defined or re-exported here is exported
+!! to consumers via the generated TypeScript and Python type packages
+!! (make types).  Do NOT add poller-internal helpers or intermediate
+!! types here.
+
 Shared models live in ``services/shared/``. This shim re-exports them so
 existing ``from poller_models import Fill`` imports keep working.
 Service-specific models (RunPollResponse, HealthResponse) live here.
