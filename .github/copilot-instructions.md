@@ -377,7 +377,7 @@ export * as Kraken from "./shared";
       package.json               # @tradegist/ibkr-relay-types
       shared/
         index.d.ts               # Re-exports: BuySell, Fill, Trade, WebhookPayloadTrades, WebhookPayload
-        types.d.ts               # Generated from shared/__init__.py (SCHEMA_MODELS)
+        types.d.ts               # Generated from services/shared/models.py (SCHEMA_MODELS)
         types.schema.json         # Intermediate JSON Schema
       poller/
         index.d.ts               # Re-exports: RunPollResponse, HealthResponse
@@ -387,7 +387,7 @@ export * as Kraken from "./shared";
       pyproject.toml             # ibkr-relay-types, deps: pydantic
       ibkr_relay_types/
         __init__.py              # Re-exports all public types
-        shared.py                # CommonFill models (generated from shared/__init__.py)
+        shared.py                # CommonFill models (generated from services/shared/models.py)
         poller.py                # Poller API types (generated from poller_models.py)
   ```
 - **Usage:** `import { Ibkr, IbkrPoller } from "@tradegist/ibkr-relay-types"`
@@ -404,7 +404,7 @@ export * as Kraken from "./shared";
     pyproject.toml              # ibkr-relay-types, deps: pydantic
     ibkr_relay_types/
       __init__.py               # Re-exports all public types
-      shared.py                 # CommonFill models (generated from shared/__init__.py public section)
+      shared.py                 # CommonFill models (generated from services/shared/models.py public section)
       poller.py                 # Poller API types (generated from poller_models.py)
   ```
 - **Usage:** `from ibkr_relay_types import Fill, Trade, WebhookPayload, BuySell`

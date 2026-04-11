@@ -237,7 +237,7 @@ types/python/
   pyproject.toml              # ibkr-relay-types, deps: pydantic
   ibkr_relay_types/
     __init__.py               # Re-exports all public types
-    shared.py                 # CommonFill models (generated from shared/__init__.py)
+    shared.py                 # CommonFill models (generated from services/shared/models.py)
     poller.py                 # Poller API types (generated from poller_models.py)
 ```
 
@@ -601,7 +601,7 @@ make sync LOCAL_FILES=1  # deploy to your droplet
     │   ├── package.json
     │   ├── shared/            # Ibkr namespace (CommonFill models)
     │   │   ├── index.d.ts
-    │   │   └── types.d.ts     # Generated from shared/__init__.py SCHEMA_MODELS
+    │   │   └── types.d.ts     # Generated from services/shared/models.py SCHEMA_MODELS
     │   └── poller/            # IbkrPoller namespace
     │       ├── index.d.ts
     │       └── types.d.ts     # Generated from poller_models.py SCHEMA_MODELS
@@ -609,7 +609,7 @@ make sync LOCAL_FILES=1  # deploy to your droplet
         ├── pyproject.toml
         └── ibkr_relay_types/
             ├── __init__.py    # Re-exports all public types
-            ├── shared.py      # Generated from shared/__init__.py
+            ├── shared.py      # Generated from services/shared/models.py
             └── poller.py      # Generated from poller_models.py
 
 ```

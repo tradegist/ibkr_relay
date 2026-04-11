@@ -85,8 +85,7 @@ def aggregate_fills(fills: list[Fill]) -> list[Trade]:
         total_cost = sum(f.cost for f in order_fills)
         total_fee = sum(f.fee for f in order_fills)
 
-        last = order_fills[-1]
-        last_ts = max(f.timestamp for f in order_fills) if order_fills else ""
+        last = max(order_fills, key=lambda f: f.timestamp)
 
         trades.append(Trade(
             orderId=last.orderId,
@@ -100,7 +99,7 @@ def aggregate_fills(fills: list[Fill]) -> list[Trade]:
             fee=round(total_fee, 4),
             fillCount=len(order_fills),
             execIds=[f.execId for f in order_fills],
-            timestamp=last_ts,
+            timestamp=last.timestamp,
             source=last.source,
             raw=order_fills[0].raw,
         ))
