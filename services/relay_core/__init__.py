@@ -12,6 +12,9 @@ from shared import RelayName
 
 # Re-export domain types so consumers can do ``from relay_core import X``.
 from .listener_engine import (
+    FatalListenerError as FatalListenerError,
+)
+from .listener_engine import (
     ListenerConfig as ListenerConfig,
 )
 from .listener_engine import (

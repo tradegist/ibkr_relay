@@ -29,6 +29,13 @@ log = logging.getLogger(__name__)
 # ── On-message result ────────────────────────────────────────────────
 
 
+class FatalListenerError(Exception):
+    """Raised when a listener encounters an unrecoverable error (e.g. bad credentials).
+
+    The listener loop will stop retrying and shut down when this is raised.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class OnMessageResult:
     """Return type for ListenerConfig.on_message.
@@ -391,6 +398,9 @@ async def _listen(
                     if not ws.closed:
                         await ws.close()
 
+        except FatalListenerError as exc:
+            log.error("[%s] Fatal error — stopping listener: %s", relay_name, exc)
+            return
         except aiohttp.ClientError as exc:
             log.error("[%s] WS connection error: %s", relay_name, exc)
         except asyncio.CancelledError:

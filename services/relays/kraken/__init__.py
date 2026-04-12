@@ -16,6 +16,7 @@ import aiohttp
 from relay_core import (
     BaseNotifier,
     BrokerRelay,
+    FatalListenerError,
     ListenerConfig,
     OnMessageResult,
     PollerConfig,
@@ -210,7 +211,14 @@ def _build_connect(client: KrakenClient) -> Any:
     ) -> aiohttp.ClientWebSocketResponse:
         # Obtain short-lived WS token via REST API (blocking, run in thread)
         import asyncio
-        token = await asyncio.to_thread(client.get_ws_token)
+        try:
+            token = await asyncio.to_thread(client.get_ws_token)
+        except RuntimeError as exc:
+            if "Permission denied" in str(exc):
+                raise FatalListenerError(
+                    f"Kraken API key lacks permission — check key scopes: {exc}"
+                ) from exc
+            raise
 
         ws = await session.ws_connect(_WS_URL)
 
