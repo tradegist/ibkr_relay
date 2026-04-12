@@ -239,7 +239,7 @@ def _on_message_factory(
 
 def _build_connect(
     ws_url: str, api_token: str,
-) -> Callable[[aiohttp.ClientSession], Any]:
+) -> Callable[[aiohttp.ClientSession], Awaitable[aiohttp.ClientWebSocketResponse]]:
     """Build a connect callback that opens an authenticated WS connection.
 
     Tracks ``last_seq`` across reconnects so the bridge can resume from
