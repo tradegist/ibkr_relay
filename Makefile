@@ -73,8 +73,6 @@ test: ## Run unit tests
 
 typecheck: ## Run mypy strict type checking
 	MYPYPATH=services/relay_core:services $(PYTHON) -m mypy services/relay_core/relay_models.py cli/test_webhook.py
-	MYPYPATH=services $(PYTHON) -m mypy services/notifier/
-	MYPYPATH=services $(PYTHON) -m mypy services/dedup/
 	MYPYPATH=services $(PYTHON) -m mypy services/shared/
 	MYPYPATH=services $(PYTHON) -m mypy services/relay_core/
 	MYPYPATH=services $(PYTHON) -m mypy services/relays/
@@ -84,7 +82,7 @@ typecheck: ## Run mypy strict type checking
 	$(PYTHON) -m mypy types/python/broker_relay_types/
 
 lint: ## Run ruff linter (use FIX=1 to auto-fix)
-	$(PYTHON) -m ruff check services/notifier/ services/dedup/ services/shared/ services/relay_core/ services/relays/ services/debug/ cli/ schema_gen.py gen_python_types.py types/python/broker_relay_types/ $(if $(FIX),--fix)
+	$(PYTHON) -m ruff check services/shared/ services/relay_core/ services/relays/ services/debug/ cli/ schema_gen.py gen_python_types.py types/python/broker_relay_types/ $(if $(FIX),--fix)
 	@if grep -rn '__all__' services/ types/ cli/ --include='*.py'; then echo "ERROR: __all__ is banned — use explicit re-exports"; exit 1; fi
 
 local-up: ## Start full stack locally (no TLS, direct port access)

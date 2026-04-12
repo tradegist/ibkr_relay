@@ -11,3 +11,4 @@ terraform/terraform.tfstate.backup
 terraform/*.tfplan
 *.tfvars
 **/__pycache__/
+.DS_Store

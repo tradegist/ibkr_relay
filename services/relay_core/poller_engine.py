@@ -12,10 +12,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from dedup import get_processed_ids, mark_processed_batch, prune
-from dedup import init_db as _init_dedup_db
-from notifier import notify
-from notifier.base import BaseNotifier
+from relay_core.dedup import get_processed_ids, mark_processed_batch, prune
+from relay_core.dedup import init_db as _init_dedup_db
+from relay_core.notifier import notify
+from relay_core.notifier.base import BaseNotifier
 from shared import Fill, RelayName, Trade, WebhookPayloadTrades, aggregate_fills
 
 log = logging.getLogger(__name__)

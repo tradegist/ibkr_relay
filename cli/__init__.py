@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 from cli.core import CoreConfig, die, env, set_config
-from notifier import validate_notifier_env
+from relay_core.notifier import validate_notifier_env
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 PROJECT_NAME = "broker-relay"

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import BaseModel
 
-from notifier.webhook import WebhookNotifier
+from relay_core.notifier.webhook import WebhookNotifier
 
 
 class _SamplePayload(BaseModel):

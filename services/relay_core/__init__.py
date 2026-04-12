@@ -7,7 +7,7 @@ Broker adapters provide callbacks; the engines handle orchestration
 import asyncio
 from dataclasses import dataclass, field
 
-from notifier.base import BaseNotifier
+from relay_core.notifier.base import BaseNotifier as BaseNotifier
 from shared import RelayName
 
 # Re-export domain types so consumers can do ``from relay_core import X``.

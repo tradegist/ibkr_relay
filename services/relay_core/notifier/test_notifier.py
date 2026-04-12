@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import BaseModel
 
-from notifier import REGISTRY, load_notifiers, notify
+from relay_core.notifier import REGISTRY, load_notifiers, notify
 
 
 class _SamplePayload(BaseModel):
@@ -17,7 +17,7 @@ class TestRegistry:
         assert "webhook" in REGISTRY
 
     def test_registry_values_are_classes(self) -> None:
-        from notifier.base import BaseNotifier
+        from relay_core.notifier.base import BaseNotifier
 
         for cls in REGISTRY.values():
             assert issubclass(cls, BaseNotifier)

@@ -10,8 +10,8 @@ import logging
 import os
 from typing import get_args
 
-from notifier import load_notifiers
-from notifier.base import BaseNotifier
+from relay_core.notifier import load_notifiers
+from relay_core.notifier.base import BaseNotifier
 from shared import RelayName
 
 from . import BrokerRelay

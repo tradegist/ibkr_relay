@@ -9,9 +9,6 @@ services:
     volumes:
       - ./services/relay_core:/app/relay_core:ro
       - ./services/relays:/app/relays:ro
-      - ./services/poller/poller:/app/poller:ro
-      - ./services/notifier:/app/notifier:ro
-      - ./services/dedup:/app/dedup:ro
       - ./services/shared:/app/shared:ro
 
   debug:

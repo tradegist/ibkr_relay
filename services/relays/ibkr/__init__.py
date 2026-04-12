@@ -10,8 +10,8 @@ import os
 from collections.abc import Callable
 from typing import Any, cast
 
-from notifier.base import BaseNotifier
 from relay_core import (
+    BaseNotifier,
     BrokerRelay,
     ListenerConfig,
     OnMessageResult,

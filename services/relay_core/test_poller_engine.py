@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dedup import get_processed_ids, mark_processed_batch
+from relay_core.dedup import get_processed_ids, mark_processed_batch
 from relay_core.poller_engine import (
     _meta_key,
     _prefix_ids,

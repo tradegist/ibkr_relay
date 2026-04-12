@@ -21,9 +21,6 @@ services:
     volumes:
       - ./services/relay_core:/app/relay_core
       - ./services/relays:/app/relays
-      - ./services/poller/poller:/app/poller
-      - ./services/notifier:/app/notifier
-      - ./services/dedup:/app/dedup
       - ./services/shared:/app/shared
     healthcheck:
       test:

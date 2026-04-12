@@ -3,7 +3,13 @@
 import sqlite3
 import unittest
 
-from dedup import get_processed_ids, is_processed, mark_processed, mark_processed_batch, prune
+from relay_core.dedup import (
+    get_processed_ids,
+    is_processed,
+    mark_processed,
+    mark_processed_batch,
+    prune,
+)
 
 
 class TestDedup(unittest.TestCase):
