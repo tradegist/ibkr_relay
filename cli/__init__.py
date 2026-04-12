@@ -42,7 +42,15 @@ def _droplet_size():
 
 
 def _pre_sync_hook():
-    validate_notifier_env()
+    # Validate notifiers for each configured relay (prefix fallback to generic)
+    relays_raw = os.environ.get("RELAYS", "").strip()
+    if relays_raw:
+        for name in relays_raw.split(","):
+            name = name.strip().lower()
+            if name:
+                validate_notifier_env(prefix=f"{name.upper()}_")
+    else:
+        validate_notifier_env()
 
 
 _RELAY_URLS: dict[str, str] = {

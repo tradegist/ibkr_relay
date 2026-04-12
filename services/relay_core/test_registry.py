@@ -160,3 +160,9 @@ class TestLoadRelays(unittest.TestCase):
     def test_relay_has_listener_config(self, _mock: MagicMock) -> None:
         relays = load_relays()
         self.assertIsNotNone(relays[0].listener_config)
+
+    @patch("relay_core.registry.load_notifiers", return_value=[])
+    def test_loads_notifiers_with_relay_prefix(self, mock_load: MagicMock) -> None:
+        """load_relays passes the relay name as prefix to load_notifiers."""
+        load_relays()
+        mock_load.assert_called_once_with(prefix="IBKR_")

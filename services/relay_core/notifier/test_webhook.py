@@ -98,6 +98,79 @@ class TestWebhookNotifier:
         mock_post.assert_called_once()
         assert mock_post.call_args.kwargs["content"]  # body was sent
 
+    @patch("notifier.webhook.httpx.post")
+    def test_prefix_reads_prefixed_vars(self, mock_post: MagicMock) -> None:
+        """Prefix=IBKR_ reads IBKR_TARGET_WEBHOOK_URL, etc."""
+        mock_post.return_value = MagicMock(status_code=200)
+        env = {
+            "IBKR_TARGET_WEBHOOK_URL": "https://ibkr.com/hook",
+            "IBKR_WEBHOOK_SECRET": "ibkr-secret",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier(prefix="IBKR_")
+
+        assert notifier._url == "https://ibkr.com/hook"
+        notifier.send(_SamplePayload(symbol="AAPL", quantity=1))
+        mock_post.assert_called_once()
+
+    @patch("notifier.webhook.httpx.post")
+    def test_prefix_falls_back_to_generic(self, mock_post: MagicMock) -> None:
+        """IBKR_ prefix set but only generic vars exist → uses generic."""
+        mock_post.return_value = MagicMock(status_code=200)
+        env = {
+            "TARGET_WEBHOOK_URL": "https://generic.com/hook",
+            "WEBHOOK_SECRET": "generic-secret",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier(prefix="IBKR_")
+
+        assert notifier._url == "https://generic.com/hook"
+
+    @patch("notifier.webhook.httpx.post")
+    def test_prefix_overrides_generic(self, mock_post: MagicMock) -> None:
+        """Prefixed var takes precedence over generic."""
+        mock_post.return_value = MagicMock(status_code=200)
+        env = {
+            "TARGET_WEBHOOK_URL": "https://generic.com",
+            "WEBHOOK_SECRET": "generic-s",
+            "IBKR_TARGET_WEBHOOK_URL": "https://ibkr.com",
+            "IBKR_WEBHOOK_SECRET": "ibkr-s",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier(prefix="IBKR_")
+
+        assert notifier._url == "https://ibkr.com"
+
+    @patch("notifier.webhook.httpx.post")
+    def test_prefix_plus_suffix(self, mock_post: MagicMock) -> None:
+        """Prefix and suffix compose: IBKR_TARGET_WEBHOOK_URL_2."""
+        mock_post.return_value = MagicMock(status_code=200)
+        env = {
+            "IBKR_TARGET_WEBHOOK_URL_2": "https://ibkr-2.com",
+            "IBKR_WEBHOOK_SECRET_2": "ibkr-s-2",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier(prefix="IBKR_", suffix="_2")
+
+        assert notifier._url == "https://ibkr-2.com"
+
+    @patch("notifier.webhook.httpx.post")
+    def test_prefix_custom_header(self, mock_post: MagicMock) -> None:
+        """Prefixed custom header vars are used."""
+        mock_post.return_value = MagicMock(status_code=200)
+        env = {
+            "IBKR_TARGET_WEBHOOK_URL": "https://ibkr.com",
+            "IBKR_WEBHOOK_SECRET": "s",
+            "IBKR_WEBHOOK_HEADER_NAME": "X-IBKR",
+            "IBKR_WEBHOOK_HEADER_VALUE": "ibkr-val",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier(prefix="IBKR_")
+
+        notifier.send(_SamplePayload(symbol="AAPL", quantity=1))
+        headers = mock_post.call_args.kwargs["headers"]
+        assert headers["X-IBKR"] == "ibkr-val"
+
     def test_required_env_vars(self) -> None:
         assert "TARGET_WEBHOOK_URL" in WebhookNotifier.required_env_vars()
         assert "WEBHOOK_SECRET" in WebhookNotifier.required_env_vars()

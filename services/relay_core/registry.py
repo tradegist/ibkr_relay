@@ -87,11 +87,12 @@ def load_relays() -> list[BrokerRelay]:
         SystemExit: On invalid RELAYS value or adapter import failure.
     """
     names = get_relay_names()
-    notifiers: list[BaseNotifier] = load_notifiers()
     relays: list[BrokerRelay] = []
 
     for name in names:
         log.info("Loading relay: %s", name)
+        prefix = f"{name.upper()}_"
+        notifiers: list[BaseNotifier] = load_notifiers(prefix=prefix)
         relay = _load_adapter(name, notifiers)
         relays.append(relay)
         log.info(

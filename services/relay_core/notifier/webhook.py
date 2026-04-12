@@ -24,23 +24,31 @@ def get_debug_webhook_path() -> str:
     return os.environ.get("DEBUG_WEBHOOK_PATH", "").strip()
 
 
-def _get_target_webhook_url(suffix: str) -> str:
-    return os.environ.get(f"TARGET_WEBHOOK_URL{suffix}", "").strip()
+def _get_env(var: str, prefix: str, suffix: str) -> str:
+    """Read ``{prefix}{var}{suffix}``, falling back to ``{var}{suffix}``."""
+    val = os.environ.get(f"{prefix}{var}{suffix}", "").strip()
+    if val:
+        return val
+    return os.environ.get(f"{var}{suffix}", "").strip()
 
 
-def _get_webhook_secret(suffix: str) -> str:
-    return os.environ.get(f"WEBHOOK_SECRET{suffix}", "").strip()
+def _get_target_webhook_url(prefix: str, suffix: str) -> str:
+    return _get_env("TARGET_WEBHOOK_URL", prefix, suffix)
 
 
-def _get_webhook_header_name(suffix: str) -> str:
-    return os.environ.get(f"WEBHOOK_HEADER_NAME{suffix}", "").strip()
+def _get_webhook_secret(prefix: str, suffix: str) -> str:
+    return _get_env("WEBHOOK_SECRET", prefix, suffix)
 
 
-def _get_webhook_header_value(suffix: str) -> str:
-    return os.environ.get(f"WEBHOOK_HEADER_VALUE{suffix}", "").strip()
+def _get_webhook_header_name(prefix: str, suffix: str) -> str:
+    return _get_env("WEBHOOK_HEADER_NAME", prefix, suffix)
 
 
-def _resolve_webhook_url(suffix: str) -> str:
+def _get_webhook_header_value(prefix: str, suffix: str) -> str:
+    return _get_env("WEBHOOK_HEADER_VALUE", prefix, suffix)
+
+
+def _resolve_webhook_url(prefix: str, suffix: str) -> str:
     """Return the webhook target URL, preferring debug inbox when configured.
 
     Checks DEBUG_WEBHOOK_PATH first. If set, constructs the container-to-container
@@ -54,7 +62,7 @@ def _resolve_webhook_url(suffix: str) -> str:
             f"http://{_DEBUG_SERVICE_NAME}:{_DEBUG_SERVICE_PORT}/debug/webhook/"
             f"{debug_path}"
         )
-    return _get_target_webhook_url(suffix)
+    return _get_target_webhook_url(prefix, suffix)
 
 
 class WebhookNotifier(BaseNotifier):
@@ -62,20 +70,23 @@ class WebhookNotifier(BaseNotifier):
 
     name = "webhook"
 
-    def __init__(self, suffix: str = "") -> None:
-        self._url = _resolve_webhook_url(suffix)
-        self._secret = _get_webhook_secret(suffix)
-        self._header_name = _get_webhook_header_name(suffix)
-        self._header_value = _get_webhook_header_value(suffix)
+    def __init__(self, prefix: str = "", suffix: str = "") -> None:
+        self._url = _resolve_webhook_url(prefix, suffix)
+        self._secret = _get_webhook_secret(prefix, suffix)
+        self._header_name = _get_webhook_header_name(prefix, suffix)
+        self._header_value = _get_webhook_header_value(prefix, suffix)
 
         # Validate using already-resolved values — no env re-reads.
         # URL is not required when DEBUG_WEBHOOK_PATH is set because
         # _resolve_webhook_url already resolved to the debug inbox.
+        # Show the prefixed var name when a prefix is active.
         missing: list[str] = []
         if not self._url:
-            missing.append(f"TARGET_WEBHOOK_URL{suffix}")
+            missing.append(f"{prefix}TARGET_WEBHOOK_URL{suffix}" if prefix
+                           else f"TARGET_WEBHOOK_URL{suffix}")
         if not self._secret:
-            missing.append(f"WEBHOOK_SECRET{suffix}")
+            missing.append(f"{prefix}WEBHOOK_SECRET{suffix}" if prefix
+                           else f"WEBHOOK_SECRET{suffix}")
         if missing:
             msg = f"Notifier {self.name!r} requires env vars: {', '.join(missing)}"
             log.error("%s", msg)

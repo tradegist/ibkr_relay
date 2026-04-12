@@ -24,13 +24,23 @@ class BaseNotifier(ABC):
 
     name: str
 
-    def __init__(self, suffix: str = "") -> None:
-        """Validate required env vars and initialize."""
-        missing = [
-            f"{var}{suffix}"
-            for var in self.required_env_vars()
-            if not os.environ.get(f"{var}{suffix}", "").strip()
-        ]
+    def __init__(self, prefix: str = "", suffix: str = "") -> None:
+        """Validate required env vars and initialize.
+
+        Args:
+            prefix: Relay-specific prefix (e.g. ``"IBKR_"``).  Each var is
+                    tried as ``{prefix}{var}{suffix}`` first, falling back
+                    to ``{var}{suffix}`` when the prefixed version is unset.
+            suffix: Multi-instance suffix (e.g. ``"_2"``).
+        """
+        missing: list[str] = []
+        for var in self.required_env_vars():
+            prefixed = f"{prefix}{var}{suffix}"
+            generic = f"{var}{suffix}"
+            if not (os.environ.get(prefixed, "").strip()
+                    or os.environ.get(generic, "").strip()):
+                # Show the prefixed name when a prefix is active
+                missing.append(prefixed if prefix else generic)
         if missing:
             msg = f"Notifier {self.name!r} requires env vars: {', '.join(missing)}"
             log.error("%s", msg)

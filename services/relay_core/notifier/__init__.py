@@ -15,18 +15,24 @@ REGISTRY: dict[str, type[BaseNotifier]] = {
 }
 
 
-def _get_notifiers_config(suffix: str) -> str:
+def _get_notifiers_config(prefix: str, suffix: str) -> str:
+    """Read ``{prefix}NOTIFIERS{suffix}``, falling back to ``NOTIFIERS{suffix}``."""
+    val = os.environ.get(f"{prefix}NOTIFIERS{suffix}", "").strip()
+    if val:
+        return val
     return os.environ.get(f"NOTIFIERS{suffix}", "").strip()
 
 
-def load_notifiers(suffix: str = "") -> list[BaseNotifier]:
+def load_notifiers(prefix: str = "", suffix: str = "") -> list[BaseNotifier]:
     """Read NOTIFIERS env var, instantiate backends, return ready list.
 
     Each backend validates its own configuration in ``__init__``.
 
     Args:
+        prefix: Relay-specific prefix (e.g. ``"IBKR_"``).  Each var is
+                tried as ``{prefix}{var}{suffix}`` first, falling back
+                to ``{var}{suffix}`` when the prefixed version is unset.
         suffix: Env var suffix for multi-instance support (e.g. "_2").
-                Applied to both NOTIFIERS and each backend's required vars.
 
     Returns:
         List of ready-to-use notifier instances. Empty list = dry-run mode.
@@ -34,10 +40,11 @@ def load_notifiers(suffix: str = "") -> list[BaseNotifier]:
     Raises:
         SystemExit: If a notifier name is unknown or a backend rejects its config.
     """
-    raw = _get_notifiers_config(suffix)
+    label = f"{prefix}NOTIFIERS{suffix}" if prefix else f"NOTIFIERS{suffix}"
+    raw = _get_notifiers_config(prefix, suffix)
     if not raw:
-        log.info("No notifiers configured (NOTIFIERS%s is empty) — dry-run mode", suffix)
-        _warn_orphaned_notifier_vars(suffix)
+        log.info("No notifiers configured (%s is empty) — dry-run mode", label)
+        _warn_orphaned_notifier_vars(prefix, suffix)
         return []
 
     names = [n.strip() for n in raw.split(",") if n.strip()]
@@ -47,36 +54,39 @@ def load_notifiers(suffix: str = "") -> list[BaseNotifier]:
         cls = REGISTRY.get(name)
         if cls is None:
             msg = (
-                f"Unknown notifier {name!r} in NOTIFIERS{suffix}. "
+                f"Unknown notifier {name!r} in {label}. "
                 f"Available: {', '.join(REGISTRY)}"
             )
             log.error("%s", msg)
             raise SystemExit(msg)
 
-        notifiers.append(cls(suffix=suffix))
-        log.info("Loaded notifier: %s%s", name, suffix or "")
+        notifiers.append(cls(prefix=prefix, suffix=suffix))
+        log.info("Loaded notifier: %s (prefix=%s, suffix=%s)", name, prefix or "-", suffix or "-")
 
     return notifiers
 
 
-def _warn_orphaned_notifier_vars(suffix: str = "") -> None:
+def _warn_orphaned_notifier_vars(prefix: str = "", suffix: str = "") -> None:
     """Warn if any registered notifier's env vars are set but NOTIFIERS is empty."""
+    label = f"{prefix}NOTIFIERS{suffix}" if prefix else f"NOTIFIERS{suffix}"
     for name, cls in REGISTRY.items():
-        orphaned = [
-            f"{var}{suffix}"
-            for var in cls.required_env_vars()
-            if os.environ.get(f"{var}{suffix}", "").strip()
-        ]
+        orphaned: list[str] = []
+        for var in cls.required_env_vars():
+            prefixed = f"{prefix}{var}{suffix}"
+            generic = f"{var}{suffix}"
+            if (os.environ.get(prefixed, "").strip()
+                    or os.environ.get(generic, "").strip()):
+                orphaned.append(prefixed if prefix else generic)
         if orphaned:
             log.warning(
-                "NOTIFIERS%s is empty but %s env vars are set: %s. "
-                "Add NOTIFIERS%s=%s to enable delivery, "
+                "%s is empty but %s env vars are set: %s. "
+                "Add %s=%s to enable delivery, "
                 "or remove them to silence this warning.",
-                suffix, name, ", ".join(orphaned), suffix, name,
+                label, name, ", ".join(orphaned), label, name,
             )
 
 
-def validate_notifier_env(suffix: str = "") -> bool:
+def validate_notifier_env(prefix: str = "", suffix: str = "") -> bool:
     """Check whether NOTIFIERS env vars are valid by instantiating backends.
 
     Returns True if NOTIFIERS is set and all backends accept their config.
@@ -85,11 +95,11 @@ def validate_notifier_env(suffix: str = "") -> bool:
 
     Designed for CLI pre-deploy validation (cli/_pre_sync_hook).
     """
-    raw = _get_notifiers_config(suffix)
+    raw = _get_notifiers_config(prefix, suffix)
     if not raw:
         # Warn if notifier env vars are set but NOTIFIERS is empty —
         # likely a misconfiguration after the notifier migration.
-        _warn_orphaned_notifier_vars(suffix)
+        _warn_orphaned_notifier_vars(prefix, suffix)
         return False
 
     names = [n.strip() for n in raw.split(",") if n.strip()]
@@ -100,7 +110,7 @@ def validate_notifier_env(suffix: str = "") -> bool:
             return False  # unknown notifier — let runtime error handle it
 
         try:
-            cls(suffix=suffix)
+            cls(prefix=prefix, suffix=suffix)
         except SystemExit as exc:
             from cli.core import die  # lazy: cli/ not available in Docker containers
             detail = str(exc) if str(exc) else f"Notifier {name!r} partially configured"
