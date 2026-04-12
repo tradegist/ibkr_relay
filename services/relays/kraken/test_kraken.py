@@ -451,7 +451,8 @@ class TestBuildFetchPagination(unittest.TestCase):
         fetch = _build_fetch(client)
         raw = fetch()
         self.assertIsNotNone(raw)
-        return json.loads(raw)  # type: ignore[arg-type]
+        raw_str = cast(str, raw)
+        return json.loads(raw_str)
 
     def test_single_page(self) -> None:
         pages = [
