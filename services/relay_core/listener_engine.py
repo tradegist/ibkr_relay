@@ -152,8 +152,13 @@ def _send_and_mark(
             )
 
         # Mark-after-notify: notify then mark (never reversed).
+        # If notify raises NotificationError, mark is skipped.
         payload = WebhookPayloadTrades(relay=relay_name, data=trades, errors=[])
-        notify(notifiers, payload)
+        notify(
+            relay.notifiers, payload,
+            retries=relay.notify_retries,
+            retry_delay_ms=relay.notify_retry_delay_ms,
+        )
 
         # Mark processed AFTER notify (relay-prefixed keys)
         prefixed_new = [f"{relay_name}:{eid}" for t in trades for eid in t.execIds]
@@ -265,7 +270,8 @@ async def _handle_event(
     """Process a single parsed WS message using adapter callbacks."""
     relay = get_relay(relay_name)
     config = relay.listener_config
-    assert config is not None  # caller guarantees listener is configured
+    if config is None:
+        raise RuntimeError(f"Relay {relay_name!r} has no listener configured")
 
     # json.loads can return any JSON type — only dicts are valid events.
     if not isinstance(data, dict):
@@ -328,7 +334,8 @@ async def _listen(
     """Connect, process events, reconnect with exponential backoff."""
     relay = get_relay(relay_name)
     config = relay.listener_config
-    assert config is not None  # caller guarantees listener is configured
+    if config is None:
+        raise RuntimeError(f"Relay {relay_name!r} has no listener configured")
 
     last_seq = 0
     retry_delay = INITIAL_RETRY_DELAY
@@ -435,7 +442,8 @@ async def start_listener(
     """
     relay = get_relay(relay_name)
     config = relay.listener_config
-    assert config is not None  # caller guarantees listener is configured
+    if config is None:
+        raise RuntimeError(f"Relay {relay_name!r} has no listener configured")
 
     log.info(
         "[%s] Listener starting (debounce=%dms)",
