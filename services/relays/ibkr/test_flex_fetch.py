@@ -1,7 +1,6 @@
 """Tests for flex_fetch — error handling and None-return contract."""
 
 import unittest
-import xml.etree.ElementTree as ET
 from unittest.mock import MagicMock, patch
 
 import httpx
