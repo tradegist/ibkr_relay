@@ -269,10 +269,16 @@ def _build_connect(
                     seq = data.get("seq")
                     if isinstance(seq, int):
                         state["last_seq"] = seq
-                except Exception:
-                    pass
+                except (ValueError, TypeError) as exc:
+                    log.debug("[ibkr] Could not parse seq from WS message: %s", exc)
             return msg
 
+        # `receive` is a regular async method on ClientWebSocketResponse (no
+        # __slots__), so attribute assignment is safe at runtime.  We patch at
+        # this level — rather than inside on_message — so that seq is tracked
+        # for every incoming WS message, including status events
+        # ("connected"/"disconnected") that event_filter discards before
+        # on_message is invoked.
         ws.receive = _tracking_receive  # type: ignore[assignment]
         return ws
 

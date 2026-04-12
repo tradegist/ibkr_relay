@@ -27,7 +27,7 @@ class KrakenClient:
         """Decode the API secret on first use (fails fast with a clear message)."""
         if self._api_secret_decoded is None:
             try:
-                self._api_secret_decoded = base64.b64decode(self._api_secret)
+                self._api_secret_decoded = base64.b64decode(self._api_secret, validate=True)
             except Exception as exc:
                 raise RuntimeError(
                     f"KRAKEN_API_SECRET is not valid base64: {exc}"
