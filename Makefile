@@ -1,4 +1,4 @@
-.PHONY: setup deploy destroy pause resume sync poll test-webhook types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats ssh help
+.PHONY: deps setup deploy destroy pause resume sync poll test-webhook types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats ssh help
 
 PROJECT = broker-relay
 PYTHON ?= .venv/bin/python3
@@ -11,9 +11,15 @@ CLI_RELAY_ENV = $(if $(ENV),RELAY_ENV=$(ENV))
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
 
+PIP ?= $(dir $(PYTHON))pip
+REQ_FILES = -r requirements-dev.txt -r services/relay_core/requirements.txt
+
+deps: ## Install Python dependencies
+	$(PIP) install $(REQ_FILES)
+
 setup: ## Create .venv and install all dependencies
 	@test -d .venv || python3 -m venv .venv
-	.venv/bin/pip install -r requirements-dev.txt -r services/relay_core/requirements.txt
+	$(MAKE) deps PIP=.venv/bin/pip
 	@echo "$(CURDIR)/services/debug" > $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 	@echo "$(CURDIR)/services" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 	@echo "$(CURDIR)/services/relay_core" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
