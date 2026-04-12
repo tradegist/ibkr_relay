@@ -119,5 +119,5 @@ class KrakenClient:
             raise RuntimeError(
                 f"GetWebSocketsToken returned invalid token value: {token!r}"
             )
-        log.info("Obtained Kraken WebSocket token")
+        log.debug("Obtained Kraken WebSocket token")
         return token

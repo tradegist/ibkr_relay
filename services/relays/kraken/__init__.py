@@ -324,8 +324,10 @@ def build_relay(notifiers: list[BaseNotifier]) -> BrokerRelay:
     if not poller_configs and listener_config is None:
         raise SystemExit(
             "Kraken relay has neither poller nor listener configured. "
-            "Set KRAKEN_API_KEY + KRAKEN_API_SECRET for polling, "
-            "or KRAKEN_LISTENER_ENABLED=true for real-time events."
+            "KRAKEN_API_KEY and KRAKEN_API_SECRET are required to enable "
+            "Kraken integration. Set those credentials to enable polling, "
+            "and set KRAKEN_LISTENER_ENABLED=true as well if you also want "
+            "the real-time WebSocket listener."
         )
 
     if not poller_configs:
