@@ -11,11 +11,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from relay_core.context import get_relay
 from relay_core.dedup import get_processed_ids, mark_processed_batch, prune
 from relay_core.dedup import init_db as _init_dedup_db
 from relay_core.env import get_env, get_env_int
 from relay_core.notifier import notify
-from relay_core.notifier.base import BaseNotifier
 from shared import Fill, RelayName, Trade, WebhookPayloadTrades, aggregate_fills
 
 log = logging.getLogger(__name__)
@@ -140,19 +140,16 @@ def prune_old(dedup_conn: sqlite3.Connection, days: int = 30) -> None:
 
 def poll_once(
     relay_name: RelayName,
-    config: PollerConfig,
-    notifiers: list[BaseNotifier],
+    poller_index: int = 0,
     dedup_conn: sqlite3.Connection | None = None,
     meta_conn: sqlite3.Connection | None = None,
-    poller_index: int = 0,
     debug: bool = False,
     replay: int = 0,
 ) -> list[Trade]:
     """Run a single poll cycle. Returns list of new aggregated trades.
 
-    *relay_name*: used for dedup key prefixing and webhook payload.
-    *config*: broker-provided fetch + parse callbacks.
-    *poller_index*: distinguishes multiple pollers for the same relay (0-based).
+    Resolves ``PollerConfig``, notifiers, and retry config from the relay
+    context via ``relay_name``.
     """
     close_dedup = dedup_conn is None
     close_meta = meta_conn is None
@@ -160,6 +157,12 @@ def poll_once(
         dedup_conn = init_dedup_db()
     if meta_conn is None:
         meta_conn = init_meta_db()
+
+    relay = get_relay(relay_name)
+    config = relay.poller_configs[poller_index]
+    notifiers = relay.notifiers
+    notify_retries = relay.notify_retries
+    notify_retry_delay_ms = relay.notify_retry_delay_ms
 
     relay_log = logging.getLogger(f"poller.{relay_name}")
     if poller_index > 0:
@@ -238,6 +241,8 @@ def poll_once(
                 notify(
                     notifiers,
                     WebhookPayloadTrades(relay=relay_name, data=trades, errors=parse_errors),
+                    retries=notify_retries,
+                    retry_delay_ms=notify_retry_delay_ms,
                 )
                 return trades
             relay_log.info("No new fills")
@@ -258,6 +263,8 @@ def poll_once(
         notify(
             notifiers,
             WebhookPayloadTrades(relay=relay_name, data=trades, errors=parse_errors),
+            retries=notify_retries,
+            retry_delay_ms=notify_retry_delay_ms,
         )
 
         # Mark all fills as processed after successful webhook (prefixed)

@@ -10,7 +10,7 @@ import logging
 import os
 from typing import get_args
 
-from relay_core.notifier import load_notifiers
+from relay_core.notifier import load_notifiers, load_retry_config
 from relay_core.notifier.base import BaseNotifier
 from shared import RelayName
 
@@ -93,7 +93,10 @@ def load_relays() -> list[BrokerRelay]:
         log.info("Loading relay: %s", name)
         prefix = f"{name.upper()}_"
         notifiers: list[BaseNotifier] = load_notifiers(prefix=prefix)
+        retries, retry_delay_ms = load_retry_config(prefix=prefix)
         relay = _load_adapter(name, notifiers)
+        relay.notify_retries = retries
+        relay.notify_retry_delay_ms = retry_delay_ms
         relays.append(relay)
         log.info(
             "Relay %s: %d poller(s), listener=%s",

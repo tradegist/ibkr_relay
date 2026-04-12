@@ -9,7 +9,6 @@ mark-after-notify.  Zero broker knowledge.
 import asyncio
 import json
 import logging
-import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,11 +16,11 @@ from typing import Any
 
 import aiohttp
 
+from relay_core.context import get_relay
 from relay_core.dedup import get_processed_ids, mark_processed_batch
 from relay_core.dedup import init_db as _init_dedup_db
 from relay_core.env import get_env, get_env_int
 from relay_core.notifier import notify
-from relay_core.notifier.base import BaseNotifier
 from shared import Fill, RelayName, WebhookPayloadTrades, aggregate_fills
 
 log = logging.getLogger(__name__)
@@ -113,14 +112,18 @@ def _strip_prefix(relay_name: str, prefixed_ids: set[str]) -> set[str]:
 def _send_and_mark(
     relay_name: RelayName,
     fills: list[Fill],
-    notifiers: list[BaseNotifier],
     db_path: str,
 ) -> None:
     """Dedup, aggregate, notify, and mark fills as processed.
 
     All blocking IO (SQLite + HTTP webhooks) in one function.
     Creates a thread-local SQLite connection (never shares across threads).
+    Resolves notifiers and retry config from the relay context.
+
+    If all notifiers fail, ``NotificationError`` propagates — fills stay
+    unprocessed and will be retried on the next event or reconnect.
     """
+    relay = get_relay(relay_name)
     conn = _init_dedup_db(Path(db_path))
     try:
         prefixed_candidates = _prefix_ids(relay_name, fills)
@@ -163,12 +166,13 @@ def _send_and_mark(
 def _send_no_mark(
     relay_name: RelayName,
     fills: list[Fill],
-    notifiers: list[BaseNotifier],
 ) -> None:
     """Aggregate and notify WITHOUT dedup or marking.
 
     Used for preliminary exec events (fire-and-forget).
+    Resolves notifiers and retry config from the relay context.
     """
+    relay = get_relay(relay_name)
     trades = aggregate_fills(fills)
     if not trades:
         return
@@ -178,7 +182,12 @@ def _send_no_mark(
             "Listener preliminary: %s %s orderId=%s @ %s (no commission)",
             trade.side.value, trade.symbol, trade.orderId, trade.price,
         )
-    notify(notifiers, WebhookPayloadTrades(relay=relay_name, data=trades, errors=[]))
+    notify(
+        relay.notifiers,
+        WebhookPayloadTrades(relay=relay_name, data=trades, errors=[]),
+        retries=relay.notify_retries,
+        retry_delay_ms=relay.notify_retry_delay_ms,
+    )
 
 
 # ── Debounce buffer ──────────────────────────────────────────────────
@@ -194,12 +203,10 @@ class DebounceBuffer:
         self,
         relay_name: RelayName,
         debounce_ms: int,
-        notifiers: list[BaseNotifier],
         db_path: str,
     ) -> None:
         self._relay_name = relay_name
         self._debounce_s = debounce_ms / 1000.0
-        self._notifiers = notifiers
         self._db_path = db_path
         self._buffer: list[Fill] = []
         self._flush_task: asyncio.Task[None] | None = None
@@ -231,7 +238,7 @@ class DebounceBuffer:
         try:
             await asyncio.to_thread(
                 _send_and_mark, self._relay_name, fills,
-                self._notifiers, self._db_path,
+                self._db_path,
             )
         except asyncio.CancelledError:
             log.warning(
@@ -252,12 +259,14 @@ class DebounceBuffer:
 async def _handle_event(
     relay_name: RelayName,
     data: Any,
-    config: ListenerConfig,
-    notifiers: list[BaseNotifier],
     debounce_buf: DebounceBuffer | None,
     db_path: str,
 ) -> None:
     """Process a single parsed WS message using adapter callbacks."""
+    relay = get_relay(relay_name)
+    config = relay.listener_config
+    assert config is not None  # caller guarantees listener is configured
+
     # json.loads can return any JSON type — only dicts are valid events.
     if not isinstance(data, dict):
         log.warning(
@@ -287,7 +296,7 @@ async def _handle_event(
         else:
             try:
                 await asyncio.to_thread(
-                    _send_and_mark, relay_name, [fill], notifiers, db_path,
+                    _send_and_mark, relay_name, [fill], db_path,
                 )
             except Exception:
                 log.exception(
@@ -301,7 +310,7 @@ async def _handle_event(
         )
         try:
             await asyncio.to_thread(
-                _send_no_mark, relay_name, [fill], notifiers,
+                _send_no_mark, relay_name, [fill],
             )
         except Exception:
             log.exception(
@@ -314,18 +323,20 @@ async def _handle_event(
 
 async def _listen(
     relay_name: RelayName,
-    config: ListenerConfig,
-    notifiers: list[BaseNotifier],
     db_path: str,
 ) -> None:
     """Connect, process events, reconnect with exponential backoff."""
+    relay = get_relay(relay_name)
+    config = relay.listener_config
+    assert config is not None  # caller guarantees listener is configured
+
     last_seq = 0
     retry_delay = INITIAL_RETRY_DELAY
 
     debounce_buf: DebounceBuffer | None = None
     if config.debounce_ms > 0:
         debounce_buf = DebounceBuffer(
-            relay_name, config.debounce_ms, notifiers, db_path,
+            relay_name, config.debounce_ms, db_path,
         )
 
     while True:
@@ -367,8 +378,8 @@ async def _listen(
                                 last_seq = seq
 
                             await _handle_event(
-                                relay_name, event_data, config,
-                                notifiers, debounce_buf, db_path,
+                                relay_name, event_data,
+                                debounce_buf, db_path,
                             )
                         elif msg.type == aiohttp.WSMsgType.ERROR:
                             log.error("[%s] WS error: %s", relay_name, ws.exception())
@@ -415,19 +426,21 @@ async def _listen(
 
 async def start_listener(
     relay_name: RelayName,
-    config: ListenerConfig,
-    notifiers: list[BaseNotifier],
     db_path: str = DEDUP_DB_PATH,
 ) -> None:
     """Start the WebSocket listener (runs indefinitely with auto-reconnect).
 
-    This is the only public entry point. Adapters build a ``ListenerConfig``
-    with their callbacks and pass it here.
+    Resolves ``ListenerConfig`` and notifiers from the relay context.
+    This is the only public entry point.
     """
+    relay = get_relay(relay_name)
+    config = relay.listener_config
+    assert config is not None  # caller guarantees listener is configured
+
     log.info(
         "[%s] Listener starting (debounce=%dms)",
         relay_name, config.debounce_ms,
     )
     log.debug("[%s] WS URL: %s", relay_name, config.ws_url)
 
-    await _listen(relay_name, config, notifiers, db_path)
+    await _listen(relay_name, db_path)

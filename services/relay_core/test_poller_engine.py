@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from relay_core.context import get_relay
 from relay_core.dedup import get_processed_ids, mark_processed_batch
 from relay_core.poller_engine import (
     _meta_key,
@@ -93,6 +94,12 @@ def _noop_fetch() -> str | None:
 
 def _noop_parse(raw: str) -> tuple[list[Fill], list[str]]:
     return [], []
+
+
+def _set_poller(cfg: Any) -> None:
+    """Set the poller config on the test relay in the context."""
+    relay = get_relay("ibkr")
+    relay.poller_configs = [cfg]
 
 
 # ── Mock PollerConfig ────────────────────────────────────────────────
@@ -207,14 +214,16 @@ class TestPollOnce:
         self, dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
     ) -> None:
         cfg = _MockPollerConfig(fetch=lambda: None)
-        result = poll_once("ibkr", cfg, [], dedup_conn=dedup_db, meta_conn=meta_db)  # type: ignore[arg-type]
+        _set_poller(cfg)
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
         assert result == []
 
     def test_no_fills_returns_empty(
         self, dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
     ) -> None:
         cfg = _MockPollerConfig()
-        result = poll_once("ibkr", cfg, [], dedup_conn=dedup_db, meta_conn=meta_db)  # type: ignore[arg-type]
+        _set_poller(cfg)
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
         assert result == []
 
     @patch("relay_core.poller_engine.notify")
@@ -227,7 +236,8 @@ class TestPollOnce:
             fetch=lambda: "<xml/>",
             parse=lambda _: ([fill], []),
         )
-        result = poll_once("ibkr", cfg, [], dedup_conn=dedup_db, meta_conn=meta_db)  # type: ignore[arg-type]
+        _set_poller(cfg)
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
         assert len(result) == 1
         assert result[0].symbol == "AAPL"
         mock_notify.assert_called_once()
@@ -245,7 +255,8 @@ class TestPollOnce:
             fetch=lambda: "<xml/>",
             parse=lambda _: ([fill], []),
         )
-        poll_once("ibkr", cfg, [], dedup_conn=dedup_db, meta_conn=meta_db)  # type: ignore[arg-type]
+        _set_poller(cfg)
+        poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
 
         # Verify stored with prefix
         found = get_processed_ids(dedup_db, {"ibkr:TX99"})
@@ -268,7 +279,8 @@ class TestPollOnce:
             fetch=lambda: "<xml/>",
             parse=lambda _: ([fill], []),
         )
-        result = poll_once("ibkr", cfg, [], dedup_conn=dedup_db, meta_conn=meta_db)  # type: ignore[arg-type]
+        _set_poller(cfg)
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
         assert result == []
         mock_notify.assert_not_called()
 
@@ -282,7 +294,8 @@ class TestPollOnce:
             fetch=lambda: "<xml/>",
             parse=lambda _: ([fill], []),
         )
-        poll_once("ibkr", cfg, [], dedup_conn=dedup_db, meta_conn=meta_db)  # type: ignore[arg-type]
+        _set_poller(cfg)
+        poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
         assert get_last_poll_ts(meta_db, "ibkr") == "20250403;150000"
 
     @patch("relay_core.poller_engine.notify")
@@ -299,7 +312,8 @@ class TestPollOnce:
             fetch=lambda: "<xml/>",
             parse=lambda _: ([old_fill, new_fill], []),
         )
-        result = poll_once("ibkr", cfg, [], dedup_conn=dedup_db, meta_conn=meta_db)  # type: ignore[arg-type]
+        _set_poller(cfg)
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
         assert len(result) == 1
 
         # Only NEW should be processed (with prefix)
@@ -317,7 +331,8 @@ class TestPollOnce:
             fetch=lambda: "<xml/>",
             parse=lambda _: ([fill], ["Unknown attr: fakeField"]),
         )
-        poll_once("ibkr", cfg, [], dedup_conn=dedup_db, meta_conn=meta_db)  # type: ignore[arg-type]
+        _set_poller(cfg)
+        poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
         sent_payload = mock_notify.call_args[0][1]
         assert "Unknown attr: fakeField" in sent_payload.errors
 
@@ -333,8 +348,9 @@ class TestPollOnce:
             fetch=lambda: "<xml/>",
             parse=lambda _: ([fill], []),
         )
+        _set_poller(cfg)
         result = poll_once(
-            "ibkr", cfg, [], dedup_conn=dedup_db, meta_conn=meta_db,  # type: ignore[arg-type]
+            "ibkr", dedup_conn=dedup_db, meta_conn=meta_db,
             replay=1,
         )
         assert len(result) == 1
@@ -354,10 +370,12 @@ class TestPollOnce:
         )
 
         # Process as ibkr
-        poll_once("ibkr", cfg, [], dedup_conn=dedup_db, meta_conn=meta_db)  # type: ignore[arg-type]
+        _set_poller(cfg)
+        poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
 
         # Same exec ID as ibkr should now be deduped
-        result = poll_once("ibkr", cfg, [], dedup_conn=dedup_db, meta_conn=meta_db)  # type: ignore[arg-type]
+        _set_poller(cfg)
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
         assert result == []
 
     @patch("relay_core.poller_engine.notify")
@@ -372,7 +390,8 @@ class TestPollOnce:
             fetch=lambda: "<xml/>",
             parse=lambda _: ([f1, f2], []),
         )
-        result = poll_once("ibkr", cfg, [], dedup_conn=dedup_db, meta_conn=meta_db)  # type: ignore[arg-type]
+        _set_poller(cfg)
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
         assert len(result) == 2
         mock_notify.assert_called_once()
         sent_payload = mock_notify.call_args[0][1]

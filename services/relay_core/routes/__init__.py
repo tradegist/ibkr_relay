@@ -57,8 +57,6 @@ async def handle_poll(request: web.Request) -> web.Response:
              f"(relay {relay_name!r} has {len(relay.poller_configs)})"}, status=404,
         )
 
-    config = relay.poller_configs[poll_idx]
-
     # Parse optional overrides from body
     replay = 0
     try:
@@ -80,8 +78,6 @@ async def handle_poll(request: web.Request) -> web.Response:
         trades = await asyncio.to_thread(
             poll_once,
             relay_name=relay.name,
-            config=config,
-            notifiers=relay.notifiers,
             poller_index=poll_idx,
             replay=replay,
         )

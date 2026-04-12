@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 from relay_core import ListenerConfig, OnMessageResult
+from relay_core.context import get_relay
 from relay_core.listener_engine import (
     DebounceBuffer,
     _handle_event,
@@ -15,6 +16,12 @@ from relay_core.listener_engine import (
     _strip_prefix,
 )
 from shared import BuySell, Fill
+
+
+def _set_listener(config: ListenerConfig) -> None:
+    """Set the listener config on the test relay in the context."""
+    relay = get_relay("ibkr")
+    relay.listener_config = config
 
 # ── Test fill factory ────────────────────────────────────────────────
 
@@ -96,7 +103,7 @@ class TestSendAndMark(unittest.TestCase):
         mock_init_db.return_value = mock_conn
 
         fill = _make_fill()
-        _send_and_mark("ibkr", [fill], [], "/tmp/test.db")
+        _send_and_mark("ibkr", [fill], "/tmp/test.db")
 
         mock_notify.assert_called_once()
         mock_mark.assert_called_once()
@@ -122,7 +129,7 @@ class TestSendAndMark(unittest.TestCase):
         mock_init_db.return_value = mock_conn
 
         fill = _make_fill(exec_id="X1")
-        _send_and_mark("ibkr", [fill], [], "/tmp/test.db")
+        _send_and_mark("ibkr", [fill], "/tmp/test.db")
 
         get_ids_args = mock_get_ids.call_args[0]
         self.assertEqual(get_ids_args[1], {"ibkr:X1"})
@@ -143,7 +150,7 @@ class TestSendAndMark(unittest.TestCase):
         mock_get_ids.return_value = {"ibkr:0001"}
 
         fill = _make_fill()
-        _send_and_mark("ibkr", [fill], [], "/tmp/test.db")
+        _send_and_mark("ibkr", [fill], "/tmp/test.db")
 
         mock_notify.assert_not_called()
         mock_mark.assert_not_called()
@@ -167,7 +174,7 @@ class TestSendAndMark(unittest.TestCase):
 
         fill = _make_fill()
         with self.assertRaises(RuntimeError):
-            _send_and_mark("ibkr", [fill], [], "/tmp/test.db")
+            _send_and_mark("ibkr", [fill], "/tmp/test.db")
 
         mock_conn.close.assert_called_once()
 
@@ -181,7 +188,7 @@ class TestSendNoMark(unittest.TestCase):
     @patch("relay_core.listener_engine.notify")
     def test_dispatches_without_marking(self, mock_notify: MagicMock) -> None:
         fill = _make_fill()
-        _send_no_mark("ibkr", [fill], [])
+        _send_no_mark("ibkr", [fill])
 
         mock_notify.assert_called_once()
         payload = mock_notify.call_args[0][1]
@@ -211,8 +218,9 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             ws_url="ws://localhost/ws", api_token="t",
             on_message=on_msg, event_filter=lambda _: False,
         )
+        _set_listener(config)
         await _handle_event(
-            "ibkr", {"type": "x"}, config, notifiers=[],
+            "ibkr", {"type": "x"},
             debounce_buf=None, db_path="/tmp/test.db",
         )
         self.assertFalse(called)
@@ -232,8 +240,9 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             on_message=on_msg, event_filter=lambda _: True,
         )
         data: dict[str, Any] = {"type": "test", "seq": 1}
+        _set_listener(config)
         await _handle_event(
-            "ibkr", data, config, notifiers=[],
+            "ibkr", data,
             debounce_buf=None, db_path="/tmp/test.db",
         )
         self.assertEqual(captured["data"], data)
@@ -254,8 +263,9 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             ws_url="ws://localhost/ws", api_token="t",
             on_message=on_msg, event_filter=lambda _: True,
         )
+        _set_listener(config)
         await _handle_event(
-            "ibkr", {"type": "x"}, config, notifiers=[],
+            "ibkr", {"type": "x"},
             debounce_buf=None, db_path="/tmp/test.db",
         )
         mock_send.assert_called_once()
@@ -279,8 +289,9 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             ws_url="ws://localhost/ws", api_token="t",
             on_message=on_msg, event_filter=lambda _: True,
         )
+        _set_listener(config)
         await _handle_event(
-            "ibkr", {"type": "x"}, config, notifiers=[],
+            "ibkr", {"type": "x"},
             debounce_buf=None, db_path="/tmp/test.db",
         )
         mock_send.assert_called_once()
@@ -303,10 +314,11 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         )
         buf = DebounceBuffer(
             relay_name="ibkr", debounce_ms=5000,
-            notifiers=[], db_path="/tmp/test.db",
+            db_path="/tmp/test.db",
         )
+        _set_listener(config)
         await _handle_event(
-            "ibkr", {"type": "x"}, config, notifiers=[],
+            "ibkr", {"type": "x"},
             debounce_buf=buf, db_path="/tmp/test.db",
         )
         # Fill should be in buffer, not dispatched directly
@@ -325,8 +337,9 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             on_message=on_msg, event_filter=lambda _: True,
         )
         # Should not raise
+        _set_listener(config)
         await _handle_event(
-            "ibkr", {"type": "x"}, config, notifiers=[],
+            "ibkr", {"type": "x"},
             debounce_buf=None, db_path="/tmp/test.db",
         )
 
@@ -345,8 +358,9 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             ws_url="ws://localhost/ws", api_token="t",
             on_message=on_msg, event_filter=lambda _: True,
         )
+        _set_listener(config)
         await _handle_event(
-            "ibkr", "just a string", config, notifiers=[],
+            "ibkr", "just a string",
             debounce_buf=None, db_path="/tmp/test.db",
         )
         self.assertFalse(called)
@@ -366,8 +380,9 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             ws_url="ws://localhost/ws", api_token="t",
             on_message=on_msg, event_filter=lambda _: True,
         )
+        _set_listener(config)
         await _handle_event(
-            "ibkr", [1, 2, 3], config, notifiers=[],
+            "ibkr", [1, 2, 3],
             debounce_buf=None, db_path="/tmp/test.db",
         )
         self.assertFalse(called)
@@ -387,8 +402,9 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             ws_url="ws://localhost/ws", api_token="t",
             on_message=on_msg, event_filter=lambda _: True,
         )
+        _set_listener(config)
         await _handle_event(
-            "ibkr", 42, config, notifiers=[],
+            "ibkr", 42,
             debounce_buf=None, db_path="/tmp/test.db",
         )
         self.assertFalse(called)
@@ -408,8 +424,9 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             ws_url="ws://localhost/ws", api_token="t",
             on_message=on_msg, event_filter=lambda _: True,
         )
+        _set_listener(config)
         await _handle_event(
-            "ibkr", None, config, notifiers=[],
+            "ibkr", None,
             debounce_buf=None, db_path="/tmp/test.db",
         )
         self.assertFalse(called)
@@ -429,8 +446,9 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             ws_url="ws://localhost/ws", api_token="t",
             on_message=on_msg, event_filter=lambda _: True,
         )
+        _set_listener(config)
         await _handle_event(
-            "ibkr", {"type": "test"}, config, notifiers=[],
+            "ibkr", {"type": "test"},
             debounce_buf=None, db_path="/tmp/test.db",
         )
         self.assertTrue(called)
@@ -448,7 +466,7 @@ class TestDebounceBuffer(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         buf = DebounceBuffer(
             relay_name="ibkr", debounce_ms=5000,
-            notifiers=[], db_path="/tmp/test.db",
+            db_path="/tmp/test.db",
         )
         fill = _make_fill(exec_id="A001")
         await buf.add(fill)
@@ -467,7 +485,7 @@ class TestDebounceBuffer(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         buf = DebounceBuffer(
             relay_name="ibkr", debounce_ms=5000,
-            notifiers=[], db_path="/tmp/test.db",
+            db_path="/tmp/test.db",
         )
         await buf.flush()
         mock_send.assert_not_called()
@@ -478,7 +496,7 @@ class TestDebounceBuffer(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         buf = DebounceBuffer(
             relay_name="ibkr", debounce_ms=50,
-            notifiers=[], db_path="/tmp/test.db",
+            db_path="/tmp/test.db",
         )
         fill = _make_fill(exec_id="B001")
         await buf.add(fill)
@@ -495,7 +513,7 @@ class TestDebounceBuffer(unittest.IsolatedAsyncioTestCase):
         """Fills are re-added to the buffer when _send_and_mark raises."""
         buf = DebounceBuffer(
             relay_name="ibkr", debounce_ms=5000,
-            notifiers=[], db_path="/tmp/test.db",
+            db_path="/tmp/test.db",
         )
         fill = _make_fill(exec_id="ERR1")
         await buf.add(fill)
@@ -518,7 +536,7 @@ class TestDebounceBuffer(unittest.IsolatedAsyncioTestCase):
 
         buf = DebounceBuffer(
             relay_name="ibkr", debounce_ms=5000,
-            notifiers=[], db_path="/tmp/test.db",
+            db_path="/tmp/test.db",
         )
         fill = _make_fill(exec_id="CAN1")
         await buf.add(fill)

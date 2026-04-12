@@ -45,6 +45,8 @@ class BrokerRelay:
 
     name: RelayName
     notifiers: list[BaseNotifier]
+    notify_retries: int = 0
+    notify_retry_delay_ms: int = 1000
     poller_configs: list[PollerConfig] = field(default_factory=list)
     listener_config: ListenerConfig | None = None
 

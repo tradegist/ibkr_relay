@@ -11,6 +11,7 @@ import logging
 import sys
 
 from . import BrokerRelay
+from .context import init_relays
 from .listener_engine import start_listener
 from .poller_engine import init_dedup_db, poll_once, prune_old
 from .registry import load_relays
@@ -41,8 +42,6 @@ async def _poll_loop(
                 await asyncio.to_thread(
                     poll_once,
                     relay_name=relay.name,
-                    config=config,
-                    notifiers=relay.notifiers,
                     poller_index=poller_index,
                 )
         except Exception:
@@ -57,11 +56,7 @@ async def _run_listener(relay: BrokerRelay) -> None:
     if relay.listener_config is None:
         return
     try:
-        await start_listener(
-            relay_name=relay.name,
-            config=relay.listener_config,
-            notifiers=relay.notifiers,
-        )
+        await start_listener(relay_name=relay.name)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -71,6 +66,7 @@ async def _run_listener(relay: BrokerRelay) -> None:
 async def amain() -> None:
     """Load all relays, start API server, pollers, and listeners."""
     relays = load_relays()
+    init_relays(relays)
     if not relays:
         log.info("No relays configured (RELAYS is empty) — running API server only")
 
