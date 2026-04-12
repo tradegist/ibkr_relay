@@ -46,7 +46,7 @@ def _get_api_secret() -> str | None:
     return os.environ.get("KRAKEN_API_SECRET", "").strip() or None
 
 
-# ── Kraken order type mapping ────────────────────���────────────────
+# ── Kraken order type mapping ──────────────────────────────────────
 
 _ORDER_TYPE_MAP: dict[str, OrderType] = {
     "market": "market",
