@@ -1,12 +1,14 @@
 """Tests for the IBKR relay adapter."""
 
+import json
 import os
 import unittest
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from relay_core import get_debounce_ms, get_poll_interval, is_listener_enabled
 from relays.ibkr import (
+    _build_connect,
     _build_poller_configs,
     _event_filter,
     _get_bridge_api_token,
@@ -358,6 +360,113 @@ class TestBuildPollerConfigs(unittest.TestCase):
         with patch.dict(os.environ, env), self.assertRaises(SystemExit) as cm:
             _build_poller_configs()
         self.assertIn("IBKR_FLEX_TOKEN", str(cm.exception))
+
+
+# ── _build_connect / last_seq tracking tests ────────────────────────
+
+
+def _make_mock_ws(messages: list[str]) -> Any:
+    """Create a mock WS whose receive() yields *messages* then CLOSED."""
+    msg_iter = iter(messages)
+
+    async def _receive() -> Any:
+        try:
+            text = next(msg_iter)
+        except StopIteration:
+            from aiohttp import WSMessage, WSMsgType
+            return WSMessage(WSMsgType.CLOSED, None, None)
+        from aiohttp import WSMessage, WSMsgType
+        return WSMessage(WSMsgType.TEXT, text, None)
+
+    ws = AsyncMock()
+    ws.receive = _receive
+    return ws
+
+
+class TestBuildConnect(unittest.IsolatedAsyncioTestCase):
+    """Test that _build_connect tracks last_seq across reconnects."""
+
+    async def test_last_seq_appended_on_reconnect(self) -> None:
+        """After receiving seq=5, the next connect should add last_seq=5."""
+        connect = _build_connect("ws://bridge/ws", "tok")
+        session = AsyncMock()
+
+        # First connect — returns a WS that yields a message with seq=5.
+        ws1 = _make_mock_ws([json.dumps({"type": "connected", "seq": 5})])
+        session.ws_connect = AsyncMock(return_value=ws1)
+
+        ws_result = await connect(session)
+        # URL should be unchanged on first connect.
+        session.ws_connect.assert_called_once()
+        called_url = session.ws_connect.call_args[0][0]
+        self.assertEqual(called_url, "ws://bridge/ws")
+
+        # Consume the message so _tracking_receive updates last_seq.
+        await ws_result.receive()
+
+        # Second connect — should append last_seq=5.
+        ws2 = _make_mock_ws([])
+        session.ws_connect = AsyncMock(return_value=ws2)
+        await connect(session)
+        called_url = session.ws_connect.call_args[0][0]
+        self.assertEqual(called_url, "ws://bridge/ws?last_seq=5")
+
+    async def test_last_seq_uses_ampersand_when_url_has_query(self) -> None:
+        connect = _build_connect("ws://bridge/ws?foo=bar", "tok")
+        session = AsyncMock()
+
+        ws1 = _make_mock_ws([json.dumps({"seq": 3})])
+        session.ws_connect = AsyncMock(return_value=ws1)
+        ws_result = await connect(session)
+        await ws_result.receive()
+
+        ws2 = _make_mock_ws([])
+        session.ws_connect = AsyncMock(return_value=ws2)
+        await connect(session)
+        called_url = session.ws_connect.call_args[0][0]
+        self.assertEqual(called_url, "ws://bridge/ws?foo=bar&last_seq=3")
+
+    async def test_non_int_seq_ignored(self) -> None:
+        connect = _build_connect("ws://bridge/ws", "tok")
+        session = AsyncMock()
+
+        ws1 = _make_mock_ws([json.dumps({"seq": "not-a-number"})])
+        session.ws_connect = AsyncMock(return_value=ws1)
+        ws_result = await connect(session)
+        await ws_result.receive()
+
+        # Second connect — last_seq should still be 0, so no param appended.
+        ws2 = _make_mock_ws([])
+        session.ws_connect = AsyncMock(return_value=ws2)
+        await connect(session)
+        called_url = session.ws_connect.call_args[0][0]
+        self.assertEqual(called_url, "ws://bridge/ws")
+
+    async def test_invalid_json_ignored(self) -> None:
+        connect = _build_connect("ws://bridge/ws", "tok")
+        session = AsyncMock()
+
+        ws1 = _make_mock_ws(["not json at all"])
+        session.ws_connect = AsyncMock(return_value=ws1)
+        ws_result = await connect(session)
+        await ws_result.receive()
+
+        ws2 = _make_mock_ws([])
+        session.ws_connect = AsyncMock(return_value=ws2)
+        await connect(session)
+        called_url = session.ws_connect.call_args[0][0]
+        self.assertEqual(called_url, "ws://bridge/ws")
+
+    async def test_auth_header_sent(self) -> None:
+        connect = _build_connect("ws://bridge/ws", "my-secret")
+        session = AsyncMock()
+
+        ws1 = _make_mock_ws([])
+        session.ws_connect = AsyncMock(return_value=ws1)
+        await connect(session)
+
+        _, kwargs = session.ws_connect.call_args
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer my-secret")
 
 
 # ── build_relay integration test ─────────────────────────────────────

@@ -350,6 +350,94 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             debounce_buf=None, db_path="/tmp/test.db",
         )
 
+    @patch("relay_core.listener_engine._send_no_mark")
+    @patch("relay_core.listener_engine._send_and_mark")
+    async def test_multi_result_splits_mark_and_no_mark(
+        self, mock_send_mark: MagicMock, mock_send_no_mark: MagicMock,
+    ) -> None:
+        """Multiple results are split: mark=True -> _send_and_mark, mark=False -> _send_no_mark."""
+        fill_a = _make_fill(exec_id="A", symbol="AAPL")
+        fill_b = _make_fill(exec_id="B", symbol="MSFT")
+        fill_c = _make_fill(exec_id="C", symbol="GOOG")
+
+        async def on_msg(
+            data: dict[str, Any],
+        ) -> list[OnMessageResult]:
+            return [
+                OnMessageResult(fill=fill_a, mark=True),
+                OnMessageResult(fill=fill_b, mark=False),
+                OnMessageResult(fill=None),          # skipped
+                OnMessageResult(fill=fill_c, mark=True),
+            ]
+
+        config = ListenerConfig(
+            connect=_dummy_connect,
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        _set_listener(config)
+        await _handle_event(
+            "ibkr", {"type": "x"},
+            debounce_buf=None, db_path="/tmp/test.db",
+        )
+
+        # mark=True fills dispatched together via _send_and_mark
+        mock_send_mark.assert_called_once()
+        mark_fills = mock_send_mark.call_args[0][1]
+        self.assertEqual(len(mark_fills), 2)
+        self.assertEqual(mark_fills[0].execId, "A")
+        self.assertEqual(mark_fills[1].execId, "C")
+
+        # mark=False fill dispatched via _send_no_mark
+        mock_send_no_mark.assert_called_once()
+        no_mark_fills = mock_send_no_mark.call_args[0][1]
+        self.assertEqual(len(no_mark_fills), 1)
+        self.assertEqual(no_mark_fills[0].execId, "B")
+
+    @patch("relay_core.listener_engine._send_no_mark")
+    @patch("relay_core.listener_engine._send_and_mark")
+    async def test_multi_result_mark_fills_use_debounce_buffer(
+        self, mock_send_mark: MagicMock, mock_send_no_mark: MagicMock,
+    ) -> None:
+        """With debounce buffer, mark=True fills go to buffer; mark=False still dispatch directly."""
+        fill_a = _make_fill(exec_id="A", symbol="AAPL")
+        fill_b = _make_fill(exec_id="B", symbol="MSFT")
+        fill_c = _make_fill(exec_id="C", symbol="GOOG")
+
+        async def on_msg(
+            data: dict[str, Any],
+        ) -> list[OnMessageResult]:
+            return [
+                OnMessageResult(fill=fill_a, mark=True),
+                OnMessageResult(fill=fill_b, mark=False),
+                OnMessageResult(fill=fill_c, mark=True),
+            ]
+
+        config = ListenerConfig(
+            connect=_dummy_connect,
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        buf = DebounceBuffer(
+            relay_name="ibkr", debounce_ms=5000,
+            db_path="/tmp/test.db",
+        )
+        _set_listener(config)
+        await _handle_event(
+            "ibkr", {"type": "x"},
+            debounce_buf=buf, db_path="/tmp/test.db",
+        )
+
+        # mark=True fills buffered, not dispatched directly
+        self.assertEqual(len(buf._buffer), 2)
+        self.assertEqual(buf._buffer[0].execId, "A")
+        self.assertEqual(buf._buffer[1].execId, "C")
+        mock_send_mark.assert_not_called()
+
+        # mark=False fill still dispatched via _send_no_mark
+        mock_send_no_mark.assert_called_once()
+        no_mark_fills = mock_send_no_mark.call_args[0][1]
+        self.assertEqual(len(no_mark_fills), 1)
+        self.assertEqual(no_mark_fills[0].execId, "B")
+
     async def test_non_dict_string_skipped(self) -> None:
         """A JSON string (not a dict) is silently skipped."""
         called = False
