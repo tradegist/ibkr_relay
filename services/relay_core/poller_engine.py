@@ -199,7 +199,8 @@ def poll_once(
         all_trades = aggregate_fills(all_fills)
         if all_trades:
             relay_log.debug(
-                "Sample trade (first):\n%s", all_trades[0].model_dump_json(indent=2),
+                "Sample trade (first):\n%s",
+                all_trades[0].model_dump_json(indent=2, exclude={"raw"}),
             )
 
         # Pre-filter by timestamp watermark to reduce dedup work
