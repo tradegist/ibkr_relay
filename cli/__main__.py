@@ -29,9 +29,7 @@ def main():
     p.add_argument("poll_idx", nargs="?", default="1", type=str,
                    help="Poller index (default: 1)")
     p.add_argument("-v", "--verbose", action="store_true",
-                   help="Run poll via SSH to see full poller logs")
-    p.add_argument("--debug", action="store_true",
-                   help="Dump raw Flex XML (implies -v)")
+                   help="Stream container logs alongside the poll")
     p.add_argument("--replay", type=int, metavar="N",
                    help="Resend N trades even if already processed (for testing)")
 

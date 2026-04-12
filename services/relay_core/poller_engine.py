@@ -44,14 +44,18 @@ class PollerConfig:
 def get_poll_interval(relay_name: RelayName) -> int:
     """Read {RELAY}_POLL_INTERVAL, falling back to POLL_INTERVAL."""
     prefix = relay_name.upper()
-    raw = os.environ.get(f"{prefix}_POLL_INTERVAL", "").strip()
-    if not raw:
-        raw = os.environ.get("POLL_INTERVAL", "600").strip()
+    relay_var = f"{prefix}_POLL_INTERVAL"
+    raw = os.environ.get(relay_var, "").strip()
+    if raw:
+        var_name = relay_var
+    else:
+        var_name = "POLL_INTERVAL"
+        raw = os.environ.get(var_name, "600").strip()
     try:
         return int(raw)
     except ValueError:
         raise SystemExit(
-            f"Invalid poll interval={raw!r} — must be an integer"
+            f"Invalid {var_name}={raw!r} — must be an integer"
         ) from None
 
 

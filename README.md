@@ -474,7 +474,7 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make resume      Restore droplet from snapshot
   make setup       Create .venv and install all dependencies
   make sync        Push .env + .env.relays + restart (S=service B=1 LOCAL_FILES=1 ENV=local)
-  make poll        Trigger an immediate poll (RELAY=ibkr IDX=1 V=1 DEBUG=1 REPLAY=N)
+  make poll        Trigger an immediate poll (RELAY=ibkr IDX=1 V=1 REPLAY=N)
   make test-webhook Send sample trades to webhook endpoint
   make types       Regenerate TypeScript + Python types from Pydantic models
   make test        Run unit tests (pytest)
@@ -520,8 +520,7 @@ make sync LOCAL_FILES=1                        # rsync files + rebuild + restart
 make sync LOCAL_FILES=1 S=relays               # full deploy, rebuild only relays
 make poll                                      # trigger immediate Flex poll (IBKR, primary)
 make poll RELAY=ibkr IDX=2                     # trigger second account poller
-make poll V=1                                  # verbose (SSH, full logs)
-make poll DEBUG=1                              # dump raw Flex XML
+make poll V=1                                  # verbose (stream container logs)
 make poll REPLAY=3                             # resend 3 trades (skip dedup)
 make test-webhook                              # send 3 sample trades to webhook
 make test-webhook S=2                          # send to second webhook
@@ -703,18 +702,16 @@ Additional flags:
 
 ```bash
 make poll RELAY=ibkr IDX=2    # second account
-make poll V=1                 # verbose — run via SSH, see full logs
-make poll DEBUG=1             # dump raw Flex XML (implies verbose)
+make poll V=1                 # verbose — stream container logs alongside poll
 make poll REPLAY=3            # resend 3 trades even if already processed (for testing)
-make poll REPLAY=5 DEBUG=1    # combine flags
+make poll REPLAY=5 V=1        # combine flags
 ```
 
 Or use the CLI directly:
 
 ```bash
 python3 -m cli poll ibkr 1          # normal (HTTP)
-python3 -m cli poll ibkr 1 -v       # verbose (SSH)
-python3 -m cli poll ibkr 1 --debug  # raw XML
+python3 -m cli poll ibkr 1 -v       # verbose (stream logs)
 python3 -m cli poll ibkr 1 --replay 3  # resend 3 trades
 ```
 

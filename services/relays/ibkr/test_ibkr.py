@@ -167,10 +167,27 @@ class TestEnvVarGetters(unittest.TestCase):
     def test_debounce_ms(self) -> None:
         self.assertEqual(get_debounce_ms("ibkr"), 0)
 
-    def test_debounce_ms_invalid_raises(self) -> None:
+    def test_debounce_ms_invalid_relay_var_raises_with_var_name(self) -> None:
         with patch.dict(os.environ, {"IBKR_LISTENER_DEBOUNCE_MS": "abc"}), \
-             self.assertRaises(SystemExit):
+             self.assertRaises(SystemExit) as cm:
             get_debounce_ms("ibkr")
+        self.assertIn("IBKR_LISTENER_DEBOUNCE_MS", str(cm.exception))
+        self.assertIn("abc", str(cm.exception))
+
+    def test_debounce_ms_invalid_fallback_var_raises_with_var_name(self) -> None:
+        with patch.dict(os.environ, {
+            "IBKR_LISTENER_DEBOUNCE_MS": "",
+            "LISTENER_DEBOUNCE_MS": "xyz",
+        }), self.assertRaises(SystemExit) as cm:
+            get_debounce_ms("ibkr")
+        self.assertIn("LISTENER_DEBOUNCE_MS", str(cm.exception))
+        self.assertIn("xyz", str(cm.exception))
+
+    def test_debounce_ms_negative_raises_with_var_name(self) -> None:
+        with patch.dict(os.environ, {"IBKR_LISTENER_DEBOUNCE_MS": "-5"}), \
+             self.assertRaises(SystemExit) as cm:
+            get_debounce_ms("ibkr")
+        self.assertIn("IBKR_LISTENER_DEBOUNCE_MS", str(cm.exception))
 
 
 # ── Event filter tests ───────────────────────────────────────────────
@@ -294,11 +311,28 @@ class TestBuildPollerConfigs(unittest.TestCase):
             configs = _build_poller_configs()
             self.assertEqual(len(configs), 2)
 
-    def test_second_poller_skipped_if_incomplete(self) -> None:
+    def test_second_poller_falls_back_to_primary_token(self) -> None:
+        """Only IBKR_FLEX_QUERY_ID_2 set → uses primary IBKR_FLEX_TOKEN."""
+        with patch.dict(os.environ, {"IBKR_FLEX_QUERY_ID_2": "789"}):
+            configs = _build_poller_configs()
+            self.assertEqual(len(configs), 2)
+
+    def test_second_poller_skipped_without_query_id(self) -> None:
         with patch.dict(os.environ, {"IBKR_FLEX_TOKEN_2": "tok2"}):
-            # Missing IBKR_FLEX_QUERY_ID_2
+            # Missing IBKR_FLEX_QUERY_ID_2 → no second poller
             configs = _build_poller_configs()
             self.assertEqual(len(configs), 1)
+
+    def test_second_poller_no_token_at_all_raises(self) -> None:
+        """IBKR_FLEX_QUERY_ID_2 set but no token anywhere → SystemExit."""
+        env = {
+            "IBKR_FLEX_TOKEN": "",
+            "IBKR_FLEX_QUERY_ID": "",
+            "IBKR_FLEX_QUERY_ID_2": "789",
+        }
+        with patch.dict(os.environ, env), self.assertRaises(SystemExit) as cm:
+            _build_poller_configs()
+        self.assertIn("IBKR_FLEX_TOKEN", str(cm.exception))
 
     def test_no_flex_creds_returns_empty(self) -> None:
         """Listener-only mode: no Flex credentials → empty list."""

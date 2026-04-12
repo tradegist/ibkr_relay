@@ -65,7 +65,7 @@ async def handle_poll(request: web.Request) -> web.Response:
         body = await request.json()
         replay = int(body.get("replay") or 0)
     except Exception:
-        pass # no body or malformed — use env defaults
+        pass  # no body or malformed — use env defaults
 
     # Acquire the per-poller lock (fail-fast if already running)
     poll_lock = relay.poll_locks[poll_idx] if relay.poll_locks else None

@@ -111,10 +111,16 @@ def _build_poller_configs() -> list[PollerConfig]:
             f"IBKR poller partially configured — {missing} must be set"
         )
 
-    # Secondary poller (_2 suffix) — optional
-    token_2 = _get_flex_token("_2")
+    # Secondary poller (_2 suffix) — only IBKR_FLEX_QUERY_ID_2 is required;
+    # IBKR_FLEX_TOKEN_2 falls back to the primary token.
     query_2 = _get_flex_query_id("_2")
-    if token_2 and query_2:
+    if query_2:
+        token_2 = _get_flex_token("_2") or token
+        if not token_2:
+            raise SystemExit(
+                "IBKR_FLEX_QUERY_ID_2 is set but no token available"
+                " — set IBKR_FLEX_TOKEN_2 or IBKR_FLEX_TOKEN"
+            )
         configs.append(PollerConfig(
             fetch=_build_fetch(token_2, query_2),
             parse=parse_fills,
