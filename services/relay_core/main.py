@@ -11,7 +11,7 @@ import logging
 import os
 import sys
 
-from . import BrokerRelay
+from . import BrokerRelay, StartupContext
 from .context import init_relays
 from .listener_engine import start_listener
 from .poller_engine import init_dedup_db, poll_once, prune_old
@@ -22,26 +22,18 @@ log = logging.getLogger("relays")
 
 
 def configure_logging() -> None:
-    """Set up root logging and redaction filters.
+    """Set up root logging level and format.
 
     Called once from ``amain()`` so the level respects env vars at startup
-    rather than at import time.
+    rather than at import time.  Relay-specific log filters (e.g. token
+    redaction) are registered later via the startup lifecycle.
     """
-    from relays.ibkr.flex_fetch import _RedactTokenFilter
-
     level_name = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
     logging.basicConfig(
         level=getattr(logging, level_name, logging.INFO),
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-
-    # Redact sensitive query-param tokens (e.g. Flex ``t=``) from all log output.
-    # The filter lives in flex_fetch; we install it on every root handler so it
-    # catches records propagated from child loggers like httpx._client.
-    redact = _RedactTokenFilter()
-    for handler in logging.getLogger().handlers:
-        handler.addFilter(redact)
 
 
 async def _poll_loop(
@@ -89,6 +81,14 @@ async def amain() -> None:
     init_relays(relays)
     if not relays:
         log.info("No relays configured (RELAYS is empty) — running API server only")
+
+    # Run relay startup lifecycle — collect and apply cross-cutting hooks
+    # (e.g. log filters) registered by individual adapters.
+    ctx = StartupContext()
+    for relay in relays:
+        if relay.on_start is not None:
+            relay.on_start(ctx)
+    ctx.apply()
 
     if relays:
         # One-time startup prune

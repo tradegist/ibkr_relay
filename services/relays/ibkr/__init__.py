@@ -18,6 +18,7 @@ from relay_core import (
     ListenerConfig,
     OnMessageResult,
     PollerConfig,
+    StartupContext,
     get_debounce_ms,
     get_poll_interval,
     is_listener_enabled,
@@ -26,7 +27,7 @@ from relay_core import (
 from shared import BuySell, Fill, Source
 
 from .bridge_models import WsEnvelope
-from .flex_fetch import fetch_flex_report
+from .flex_fetch import _RedactTokenFilter, fetch_flex_report
 from .flex_parser import parse_fills
 from .utilities import normalize_asset_class
 
@@ -301,6 +302,13 @@ def _build_listener_config() -> ListenerConfig | None:
     )
 
 
+# ── Startup lifecycle ────────────────────────────────────────────────
+
+
+def _on_start(ctx: StartupContext) -> None:
+    ctx.add_logging_filter(_RedactTokenFilter())
+
+
 # ── Public API ───────────────────────────────────────────────────────
 
 def build_relay(notifiers: list[BaseNotifier]) -> BrokerRelay:
@@ -325,4 +333,5 @@ def build_relay(notifiers: list[BaseNotifier]) -> BrokerRelay:
         notifiers=notifiers,
         poller_configs=poller_configs,
         listener_config=listener_config,
+        on_start=_on_start,
     )

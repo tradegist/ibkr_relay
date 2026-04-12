@@ -1,6 +1,7 @@
 """Tests for the Kraken WebSocket v2 parser."""
 
 import unittest
+from typing import cast
 
 from shared import BuySell
 
@@ -24,8 +25,7 @@ def _make_execution(**overrides: object) -> KrakenWsExecution:
         "fees": [{"asset": "USD", "qty": 6.5}],
         "timestamp": "2026-04-12T10:00:00Z",
     }
-    base.update(overrides)  # type: ignore[typeddict-item]
-    return base
+    return cast(KrakenWsExecution, {**base, **overrides})
 
 
 def _make_message(data: list[KrakenWsExecution]) -> KrakenWsMessage:
@@ -80,8 +80,8 @@ class TestParseExecutions(unittest.TestCase):
         self.assertEqual(errors, [])
 
     def test_data_not_list_appends_error(self) -> None:
-        msg = {"channel": "executions", "data": "bad"}
-        fills, errors = parse_executions(msg)  # type: ignore[arg-type]
+        msg = cast(KrakenWsMessage, {"channel": "executions", "data": "bad"})
+        fills, errors = parse_executions(msg)
         self.assertEqual(fills, [])
         self.assertEqual(len(errors), 1)
         self.assertIn("missing 'data' list", errors[0])
@@ -93,8 +93,8 @@ class TestParseExecutions(unittest.TestCase):
         self.assertEqual(errors, [])
 
     def test_non_dict_item_appends_error(self) -> None:
-        msg = {"channel": "executions", "data": ["not-a-dict"]}
-        fills, errors = parse_executions(msg)  # type: ignore[arg-type]
+        msg = cast(KrakenWsMessage, {"channel": "executions", "data": ["not-a-dict"]})
+        fills, errors = parse_executions(msg)
         self.assertEqual(fills, [])
         self.assertEqual(len(errors), 1)
         self.assertIn("not a dict", errors[0])

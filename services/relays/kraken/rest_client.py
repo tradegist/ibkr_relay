@@ -40,10 +40,10 @@ class KrakenClient:
         signature = hmac.new(self._get_secret(), hmac_msg, hashlib.sha512).digest()
         return base64.b64encode(signature).decode()
 
-    def _request(self, urlpath: str, extra_data: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _request(self, urlpath: str, extra_data: dict[str, str | int] | None = None) -> dict[str, Any]:
         """Make an authenticated POST request to a private Kraken endpoint."""
         nonce = int(time.time() * 1_000_000)
-        data: dict[str, Any] = {"nonce": nonce}
+        data: dict[str, str | int] = {"nonce": nonce}
         if extra_data:
             data.update(extra_data)
 
@@ -94,7 +94,7 @@ class KrakenClient:
         Returns:
             Dict with 'trades' (dict of txid -> trade info) and 'count'.
         """
-        extra: dict[str, Any] = {"ofs": ofs}
+        extra: dict[str, str | int] = {"ofs": ofs}
         if start is not None:
             extra["start"] = start
         return self._request("/0/private/TradesHistory", extra)

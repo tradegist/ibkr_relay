@@ -5,6 +5,8 @@ Broker adapters provide callbacks; the engines handle orchestration
 """
 
 import asyncio
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from relay_core.notifier.base import BaseNotifier as BaseNotifier
@@ -53,5 +55,37 @@ class BrokerRelay:
     poller_configs: list[PollerConfig] = field(default_factory=list)
     listener_config: ListenerConfig | None = None
 
+    # Lifecycle hook — called by the orchestrator before the event loop starts.
+    # Relay adapters use this to register cross-cutting concerns (e.g. log filters).
+    on_start: Callable[["StartupContext"], None] | None = None
+
     # Runtime state (set by the orchestrator, not by the adapter)
     poll_locks: list[asyncio.Lock] = field(default_factory=list)
+
+
+# ── Relay startup lifecycle ───────────────────────────────────────────
+
+
+class StartupContext:
+    """Passed to each relay's on_start() during orchestrator startup.
+
+    Relays use this to register cross-cutting concerns without depending
+    on the orchestrator directly.  Currently supports logging filters;
+    further hooks can be added here as needed.
+    """
+
+    def __init__(self) -> None:
+        self._log_filters: list[logging.Filter] = []
+
+    def add_logging_filter(self, f: logging.Filter) -> None:
+        """Register a filter to be applied to every root logging handler."""
+        self._log_filters.append(f)
+
+    def apply(self) -> None:
+        """Apply all registered filters to the root logger's handlers.
+
+        Called once by the orchestrator after all relays have started.
+        """
+        for handler in logging.getLogger().handlers:
+            for f in self._log_filters:
+                handler.addFilter(f)

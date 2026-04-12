@@ -297,43 +297,51 @@ async def _handle_event(
 
     results: list[OnMessageResult] = await config.on_message(data)
 
+    mark_fills: list[Fill] = []
+    no_mark_fills: list[Fill] = []
+
     for result in results:
         if result.fill is None:
             continue
-
         fill = result.fill
-
         if result.mark:
             log.info(
                 "[%s] Fill: %s %s execId=%s fee=%s",
                 relay_name, fill.side.value, fill.symbol, fill.execId, fill.fee,
             )
-            if debounce_buf is not None:
-                await debounce_buf.add(fill)
-            else:
-                try:
-                    await asyncio.to_thread(
-                        _send_and_mark, relay_name, [fill], db_path,
-                    )
-                except Exception:
-                    log.exception(
-                        "[%s] Failed to dispatch fill execId=%s",
-                        relay_name, fill.execId,
-                    )
+            mark_fills.append(fill)
         else:
             log.info(
                 "[%s] Fill (no-mark): %s %s execId=%s",
                 relay_name, fill.side.value, fill.symbol, fill.execId,
             )
+            no_mark_fills.append(fill)
+
+    if mark_fills:
+        if debounce_buf is not None:
+            for fill in mark_fills:
+                await debounce_buf.add(fill)
+        else:
             try:
                 await asyncio.to_thread(
-                    _send_no_mark, relay_name, [fill],
+                    _send_and_mark, relay_name, mark_fills, db_path,
                 )
             except Exception:
                 log.exception(
-                    "[%s] Failed to dispatch fill execId=%s",
-                    relay_name, fill.execId,
+                    "[%s] Failed to dispatch %d fill(s)",
+                    relay_name, len(mark_fills),
                 )
+
+    if no_mark_fills:
+        try:
+            await asyncio.to_thread(
+                _send_no_mark, relay_name, no_mark_fills,
+            )
+        except Exception:
+            log.exception(
+                "[%s] Failed to dispatch %d no-mark fill(s)",
+                relay_name, len(no_mark_fills),
+            )
 
 
 # ── WebSocket listener loop ─────────────────────────────────────────

@@ -4,7 +4,7 @@ import json
 import os
 import time
 import unittest
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from relay_core import (
@@ -70,8 +70,7 @@ def _make_rest_trade(**overrides: object) -> KrakenRestTrade:
         "cost": "6500.0",
         "fee": "6.5",
     }
-    base.update(overrides)  # type: ignore[typeddict-item]
-    return base
+    return cast(KrakenRestTrade, {**base, **overrides})
 
 
 # ── Env var getter tests ──────────────────────────────────────────────────────
