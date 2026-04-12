@@ -397,6 +397,17 @@ services/relays/kraken/
 - **Listener** — the `connect` callback obtains a short-lived WS token via REST (`GetWebSocketsToken`), opens a websocket to `wss://ws-auth.kraken.com/v2`, sends a subscription message for the `executions` channel, and returns the ready websocket. The `on_message` callback uses `ws_parser.parse_executions()` to extract multiple fills per message with `source="ws_execution"`.
 - **All asset classes are `"crypto"`** — Kraken is a crypto-only exchange.
 
+### Fee normalisation convention (apply to all relay adapters)
+
+When mapping a broker fill to a `Fill` model, use this priority order for the `fee` field:
+
+1. **Prefer a pre-converted equivalent field** if the broker provides one (e.g. Kraken's `fee_usd_equiv`). It is always meaningful regardless of how many fee currencies are involved.
+2. **Single-asset fallback** — if the broker provides a `fees` array, only aggregate entries when every entry shares the same `asset`. Summing across different assets (e.g. USD + BTC) produces a number in no real currency; return `0.0` instead.
+3. **`abs()` per entry, not on the total** — fee quantities may be signed. Apply `abs(qty)` to each entry before summing, not `abs(sum(...))` at the end. `abs(-5 + 3) = 2` understates the true fee; `abs(-5) + abs(3) = 8` is correct.
+4. Return `0.0` when no fee information is available.
+
+See `services/relays/kraken/ws_parser.py` (`_extract_fee`) for the reference implementation.
+
 ## Notifier Package
 
 The `services/relay_core/notifier/` package provides a pluggable notification backend system used by all relays.
