@@ -5,6 +5,8 @@ import unittest
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import aiohttp
+
 from relay_core import ListenerConfig, OnMessageResult
 from relay_core.context import get_relay
 from relay_core.listener_engine import (
@@ -16,6 +18,11 @@ from relay_core.listener_engine import (
     _strip_prefix,
 )
 from shared import BuySell, Fill
+
+
+async def _dummy_connect(session: aiohttp.ClientSession) -> aiohttp.ClientWebSocketResponse:
+    """Placeholder connect callback — tests never call it."""
+    raise NotImplementedError("test dummy")
 
 
 def _set_listener(config: ListenerConfig) -> None:
@@ -52,9 +59,9 @@ def _make_fill(
 
 async def _noop_on_message(
     data: dict[str, Any],
-) -> OnMessageResult:
+) -> list[OnMessageResult]:
     """Default no-op on_message for tests that don't need it."""
-    return OnMessageResult()
+    return []
 
 
 # ── Namespace helper tests ───────────────────────────────────────────
@@ -209,13 +216,13 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
 
         async def on_msg(
             data: dict[str, Any],
-        ) -> OnMessageResult:
+        ) -> list[OnMessageResult]:
             nonlocal called
             called = True
-            return OnMessageResult()
+            return []
 
         config = ListenerConfig(
-            ws_url="ws://localhost/ws", api_token="t",
+            connect=_dummy_connect,
             on_message=on_msg, event_filter=lambda _: False,
         )
         _set_listener(config)
@@ -231,12 +238,12 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
 
         async def on_msg(
             data: dict[str, Any],
-        ) -> OnMessageResult:
+        ) -> list[OnMessageResult]:
             captured["data"] = data
-            return OnMessageResult()
+            return []
 
         config = ListenerConfig(
-            ws_url="ws://localhost/ws", api_token="t",
+            connect=_dummy_connect,
             on_message=on_msg, event_filter=lambda _: True,
         )
         data: dict[str, Any] = {"type": "test", "seq": 1}
@@ -256,11 +263,11 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
 
         async def on_msg(
             data: dict[str, Any],
-        ) -> OnMessageResult:
-            return OnMessageResult(fill=fill, mark=True)
+        ) -> list[OnMessageResult]:
+            return [OnMessageResult(fill=fill, mark=True)]
 
         config = ListenerConfig(
-            ws_url="ws://localhost/ws", api_token="t",
+            connect=_dummy_connect,
             on_message=on_msg, event_filter=lambda _: True,
         )
         _set_listener(config)
@@ -282,11 +289,11 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
 
         async def on_msg(
             data: dict[str, Any],
-        ) -> OnMessageResult:
-            return OnMessageResult(fill=fill, mark=False)
+        ) -> list[OnMessageResult]:
+            return [OnMessageResult(fill=fill, mark=False)]
 
         config = ListenerConfig(
-            ws_url="ws://localhost/ws", api_token="t",
+            connect=_dummy_connect,
             on_message=on_msg, event_filter=lambda _: True,
         )
         _set_listener(config)
@@ -305,11 +312,11 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
 
         async def on_msg(
             data: dict[str, Any],
-        ) -> OnMessageResult:
-            return OnMessageResult(fill=fill, mark=True)
+        ) -> list[OnMessageResult]:
+            return [OnMessageResult(fill=fill, mark=True)]
 
         config = ListenerConfig(
-            ws_url="ws://localhost/ws", api_token="t",
+            connect=_dummy_connect,
             on_message=on_msg, event_filter=lambda _: True,
         )
         buf = DebounceBuffer(
@@ -329,11 +336,11 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         """If on_message returns fill=None, nothing is dispatched."""
         async def on_msg(
             data: dict[str, Any],
-        ) -> OnMessageResult:
-            return OnMessageResult()
+        ) -> list[OnMessageResult]:
+            return []
 
         config = ListenerConfig(
-            ws_url="ws://localhost/ws", api_token="t",
+            connect=_dummy_connect,
             on_message=on_msg, event_filter=lambda _: True,
         )
         # Should not raise
@@ -349,13 +356,13 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
 
         async def on_msg(
             data: dict[str, Any],
-        ) -> OnMessageResult:
+        ) -> list[OnMessageResult]:
             nonlocal called
             called = True
-            return OnMessageResult()
+            return []
 
         config = ListenerConfig(
-            ws_url="ws://localhost/ws", api_token="t",
+            connect=_dummy_connect,
             on_message=on_msg, event_filter=lambda _: True,
         )
         _set_listener(config)
@@ -371,13 +378,13 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
 
         async def on_msg(
             data: dict[str, Any],
-        ) -> OnMessageResult:
+        ) -> list[OnMessageResult]:
             nonlocal called
             called = True
-            return OnMessageResult()
+            return []
 
         config = ListenerConfig(
-            ws_url="ws://localhost/ws", api_token="t",
+            connect=_dummy_connect,
             on_message=on_msg, event_filter=lambda _: True,
         )
         _set_listener(config)
@@ -393,13 +400,13 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
 
         async def on_msg(
             data: dict[str, Any],
-        ) -> OnMessageResult:
+        ) -> list[OnMessageResult]:
             nonlocal called
             called = True
-            return OnMessageResult()
+            return []
 
         config = ListenerConfig(
-            ws_url="ws://localhost/ws", api_token="t",
+            connect=_dummy_connect,
             on_message=on_msg, event_filter=lambda _: True,
         )
         _set_listener(config)
@@ -415,13 +422,13 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
 
         async def on_msg(
             data: dict[str, Any],
-        ) -> OnMessageResult:
+        ) -> list[OnMessageResult]:
             nonlocal called
             called = True
-            return OnMessageResult()
+            return []
 
         config = ListenerConfig(
-            ws_url="ws://localhost/ws", api_token="t",
+            connect=_dummy_connect,
             on_message=on_msg, event_filter=lambda _: True,
         )
         _set_listener(config)
@@ -437,13 +444,13 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
 
         async def on_msg(
             data: dict[str, Any],
-        ) -> OnMessageResult:
+        ) -> list[OnMessageResult]:
             nonlocal called
             called = True
-            return OnMessageResult()
+            return []
 
         config = ListenerConfig(
-            ws_url="ws://localhost/ws", api_token="t",
+            connect=_dummy_connect,
             on_message=on_msg, event_filter=lambda _: True,
         )
         _set_listener(config)

@@ -249,40 +249,42 @@ class TestOnMessage(unittest.IsolatedAsyncioTestCase):
         envelope = _make_envelope(event_type="commissionReportEvent")
         data: dict[str, Any] = envelope.model_dump()
 
-        result = await handler(data)
+        results = await handler(data)
 
-        self.assertIsNotNone(result.fill)
-        self.assertTrue(result.mark)
-        if result.fill is None:
+        self.assertEqual(len(results), 1)
+        self.assertIsNotNone(results[0].fill)
+        self.assertTrue(results[0].mark)
+        if results[0].fill is None:
             raise RuntimeError("Expected fill to be set")
-        self.assertEqual(result.fill.execId, "0001")
+        self.assertEqual(results[0].fill.execId, "0001")
 
     async def test_exec_event_returns_fill_without_mark_when_enabled(self) -> None:
         handler = _on_message_factory(exec_events_enabled=True)
         envelope = _make_envelope(event_type="execDetailsEvent")
         data: dict[str, Any] = envelope.model_dump()
 
-        result = await handler(data)
+        results = await handler(data)
 
-        self.assertIsNotNone(result.fill)
-        self.assertFalse(result.mark)
+        self.assertEqual(len(results), 1)
+        self.assertIsNotNone(results[0].fill)
+        self.assertFalse(results[0].mark)
 
     async def test_exec_event_skipped_when_disabled(self) -> None:
         handler = _on_message_factory(exec_events_enabled=False)
         envelope = _make_envelope(event_type="execDetailsEvent")
         data: dict[str, Any] = envelope.model_dump()
 
-        result = await handler(data)
+        results = await handler(data)
 
-        self.assertIsNone(result.fill)
+        self.assertEqual(results, [])
 
     async def test_invalid_envelope_skipped(self) -> None:
         handler = _on_message_factory(exec_events_enabled=True)
         data: dict[str, Any] = {"type": "commissionReportEvent", "bad": "data"}
 
-        result = await handler(data)
+        results = await handler(data)
 
-        self.assertIsNone(result.fill)
+        self.assertEqual(results, [])
 
 
 # ── Poller config tests ──────────────────────────────────────────────
