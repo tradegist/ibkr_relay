@@ -56,7 +56,22 @@ class KrakenClient:
         url = f"{_BASE_URL}{urlpath}"
         resp = httpx.post(url, data=data, headers=headers, timeout=15)
         resp.raise_for_status()
-        body: dict[str, Any] = resp.json()
+
+        try:
+            body = resp.json()
+        except Exception as exc:
+            snippet = resp.text[:200]
+            raise RuntimeError(
+                f"Kraken API returned invalid JSON on {urlpath} "
+                f"(status {resp.status_code}): {exc} — body: {snippet!r}"
+            ) from exc
+
+        if not isinstance(body, dict):
+            snippet = resp.text[:200]
+            raise RuntimeError(
+                f"Kraken API returned unexpected JSON type on {urlpath} "
+                f"(expected object, got {type(body).__name__}) — body: {snippet!r}"
+            )
 
         errors = body.get("error", [])
         if errors:

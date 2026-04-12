@@ -242,6 +242,29 @@ class TestBuildParse(unittest.TestCase):
         self.assertEqual(fills, [])
         self.assertEqual(errors, [])
 
+    def test_top_level_not_a_dict_returns_error(self) -> None:
+        parse = _build_parse()
+        fills, errors = parse(json.dumps([{"trades": {}}]))
+        self.assertEqual(fills, [])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("top-level", errors[0])
+
+    def test_trades_not_a_dict_returns_error(self) -> None:
+        parse = _build_parse()
+        fills, errors = parse(json.dumps({"trades": [_make_rest_trade()]}))
+        self.assertEqual(fills, [])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("trades", errors[0])
+
+    def test_trade_value_not_a_dict_appends_error_and_continues(self) -> None:
+        parse = _build_parse()
+        trades: dict[str, Any] = {"BAD": "not-a-dict", "GOOD": _make_rest_trade()}
+        fills, errors = parse(json.dumps({"trades": trades}))
+        self.assertEqual(len(fills), 1)
+        self.assertEqual(fills[0].execId, "GOOD")
+        self.assertEqual(len(errors), 1)
+        self.assertIn("BAD", errors[0])
+
 
 # ── Poller config tests ───────────────────────────────────────────────────────
 

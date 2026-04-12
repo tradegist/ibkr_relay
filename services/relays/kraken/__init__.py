@@ -106,12 +106,26 @@ def _build_parse() -> Any:
             result: dict[str, Any] = json.loads(raw)
         except json.JSONDecodeError as exc:
             return [], [f"Failed to parse Kraken REST response JSON: {exc}"]
-        raw_trades: dict[str, KrakenRestTrade] = result.get("trades", {})
+
+        if not isinstance(result, dict):
+            return [], [
+                "Failed to parse Kraken REST response: top-level JSON must be an object"
+            ]
+
+        raw_trades = result.get("trades", {})
+
+        if not isinstance(raw_trades, dict):
+            return [], [
+                "Failed to parse Kraken REST response: 'trades' must be an object"
+            ]
 
         fills: list[Fill] = []
         errors: list[str] = []
 
         for txid, trade_data in raw_trades.items():
+            if not isinstance(trade_data, dict):
+                errors.append(f"Failed to parse trade {txid}: expected an object, got {type(trade_data).__name__}")
+                continue
             try:
                 fill = _parse_rest_trade(txid, trade_data)
                 fills.append(fill)
