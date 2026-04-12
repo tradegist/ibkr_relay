@@ -6,7 +6,7 @@ from typing import cast
 from shared import BuySell
 
 from .kraken_types import KrakenWsExecution, KrakenWsMessage
-from .ws_parser import _parse_fill, normalize_order_type, parse_executions
+from .ws_parser import _extract_fee, _parse_fill, normalize_order_type, parse_executions
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -166,13 +166,22 @@ class TestParseFill(unittest.TestCase):
         fill = _parse_fill(_make_execution(order_type="algo"))
         self.assertIsNone(fill.orderType)
 
-    def test_fee_summed_across_entries(self) -> None:
+    def test_fee_single_asset_summed(self) -> None:
+        item = _make_execution(fees=[
+            {"asset": "USD", "qty": 3.0},
+            {"asset": "USD", "qty": 1.5},
+        ])
+        fill = _parse_fill(item)
+        self.assertAlmostEqual(fill.fee, 4.5)
+
+    def test_fee_mixed_assets_returns_zero(self) -> None:
+        # Summing USD + BTC fees produces a meaningless scalar; return 0.0.
         item = _make_execution(fees=[
             {"asset": "USD", "qty": 3.0},
             {"asset": "BTC", "qty": 1.5},
         ])
         fill = _parse_fill(item)
-        self.assertAlmostEqual(fill.fee, 4.5)
+        self.assertAlmostEqual(fill.fee, 0.0)
 
     def test_fee_is_absolute_value(self) -> None:
         item = _make_execution(fees=[{"asset": "USD", "qty": -2.0}])
@@ -197,6 +206,67 @@ class TestParseFill(unittest.TestCase):
     def test_empty_fees_list_gives_zero(self) -> None:
         fill = _parse_fill(_make_execution(fees=[]))
         self.assertEqual(fill.fee, 0.0)
+
+    def test_fee_usd_equiv_takes_priority(self) -> None:
+        # fee_usd_equiv should be used even when fees[] is present.
+        item = _make_execution(
+            fee_usd_equiv=9.99,
+            fees=[{"asset": "USD", "qty": 3.0}],
+        )
+        fill = _parse_fill(item)
+        self.assertAlmostEqual(fill.fee, 9.99)
+
+    def test_fee_usd_equiv_negative_is_absolute(self) -> None:
+        item = _make_execution(fee_usd_equiv=-5.0)
+        fill = _parse_fill(item)
+        self.assertAlmostEqual(fill.fee, 5.0)
+
+
+# ── _extract_fee ──────────────────────────────────────────────────────────────
+
+
+class TestExtractFee(unittest.TestCase):
+
+    def test_fee_usd_equiv_wins_over_fees_array(self) -> None:
+        item = _make_execution(fee_usd_equiv=7.0, fees=[{"asset": "USD", "qty": 3.0}])
+        self.assertAlmostEqual(_extract_fee(item), 7.0)
+
+    def test_fee_usd_equiv_negative_returned_as_absolute(self) -> None:
+        item = _make_execution(fee_usd_equiv=-4.5)
+        self.assertAlmostEqual(_extract_fee(item), 4.5)
+
+    def test_single_asset_entries_summed(self) -> None:
+        item = _make_execution(fees=[
+            {"asset": "USD", "qty": 2.0},
+            {"asset": "USD", "qty": 1.0},
+        ])
+        self.assertAlmostEqual(_extract_fee(item), 3.0)
+
+    def test_single_asset_negative_qty_abs_per_entry(self) -> None:
+        # abs(-5) + abs(3) = 8, not abs(-5 + 3) = 2
+        item = _make_execution(fees=[
+            {"asset": "USD", "qty": -5.0},
+            {"asset": "USD", "qty": 3.0},
+        ])
+        self.assertAlmostEqual(_extract_fee(item), 8.0)
+
+    def test_mixed_assets_returns_zero(self) -> None:
+        item = _make_execution(fees=[
+            {"asset": "USD", "qty": 3.0},
+            {"asset": "BTC", "qty": 1.5},
+        ])
+        self.assertAlmostEqual(_extract_fee(item), 0.0)
+
+    def test_empty_fees_list_returns_zero(self) -> None:
+        self.assertAlmostEqual(_extract_fee(_make_execution(fees=[])), 0.0)
+
+    def test_no_fees_field_returns_zero(self) -> None:
+        item = cast(KrakenWsExecution, {
+            "exec_id": "X", "order_id": "O", "side": "buy",
+            "last_price": 1.0, "last_qty": 1.0, "cost": 1.0,
+        })
+        self.assertAlmostEqual(_extract_fee(item), 0.0)
+
 
     def test_raw_contains_original_item(self) -> None:
         item = _make_execution()

@@ -60,15 +60,40 @@ def parse_executions(msg: KrakenWsMessage) -> tuple[list[Fill], list[str]]:
     return fills, errors
 
 
+def _extract_fee(item: KrakenWsExecution) -> float:
+    """Return the fee for a single execution event.
+
+    Preference order:
+    1. ``fee_usd_equiv`` — Kraken's pre-converted USD equivalent; always
+       meaningful regardless of how many fee currencies are involved.
+    2. Single-asset fallback — sum ``abs(qty)`` across entries only when all
+       entries share the same asset (summing across different assets would
+       produce a number in no real currency).
+    3. Zero if neither applies.
+    """
+    fee_usd_equiv = item.get("fee_usd_equiv")
+    if isinstance(fee_usd_equiv, (int, float)):
+        return abs(float(fee_usd_equiv))
+
+    fees = item.get("fees")
+    if not isinstance(fees, list) or not fees:
+        return 0.0
+
+    assets = {entry["asset"] for entry in fees if isinstance(entry, dict) and "asset" in entry}
+    if len(assets) != 1:
+        # Mixed currencies — cannot produce a meaningful scalar; return 0.0.
+        return 0.0
+
+    return sum(
+        abs(float(entry.get("qty", 0.0)))
+        for entry in fees
+        if isinstance(entry, dict)
+    )
+
+
 def _parse_fill(item: KrakenWsExecution) -> Fill:
     """Convert a single WS execution message to a Fill model."""
-    # Sum fees from the fees array
-    total_fee = 0.0
-    fees = item.get("fees")
-    if isinstance(fees, list):
-        for fee_entry in fees:
-            if isinstance(fee_entry, dict):
-                total_fee += float(fee_entry.get("qty", 0.0))
+    total_fee = _extract_fee(item)
 
     side_raw = item.get("side", "")
     if side_raw == "buy":
@@ -90,7 +115,7 @@ def _parse_fill(item: KrakenWsExecution) -> Fill:
         price=float(item.get("last_price", 0.0)),
         volume=float(item.get("last_qty", 0.0)),
         cost=float(item.get("cost", 0.0)),
-        fee=abs(total_fee),
+        fee=total_fee,
         timestamp=str(item.get("timestamp", "")),
         source="ws_execution",
         raw=dict(item),
