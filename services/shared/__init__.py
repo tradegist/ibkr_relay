@@ -19,10 +19,7 @@ from .models import WebhookPayload as WebhookPayload
 from .models import WebhookPayloadTrades as WebhookPayloadTrades
 
 # ── Internal utilities (re-exported for sibling services) ────────────
-from .utilities import _dedup_id as _dedup_id
 from .utilities import aggregate_fills as aggregate_fills
-from .utilities import normalize_asset_class as normalize_asset_class
-from .utilities import normalize_order_type as normalize_order_type
 
 # ── Constants ────────────────────────────────────────────────────────
 DEDUP_DB_PATH = "/data/dedup/fills.db"

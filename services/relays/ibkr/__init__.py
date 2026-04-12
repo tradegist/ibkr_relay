@@ -23,7 +23,9 @@ from relay_core import (
     is_listener_enabled,
     is_poller_enabled,
 )
-from shared import BuySell, Fill, Source, normalize_asset_class
+from shared import BuySell, Fill, Source
+
+from .utilities import normalize_asset_class
 
 from .bridge_models import WsEnvelope
 from .flex_fetch import fetch_flex_report

@@ -25,7 +25,9 @@ import logging
 import xml.etree.ElementTree as ET
 from typing import Any
 
-from shared import BuySell, Fill, normalize_asset_class, normalize_order_type
+from shared import BuySell, Fill
+
+from .utilities import normalize_asset_class, normalize_order_type
 
 log = logging.getLogger("flex_parser")
 
