@@ -55,7 +55,7 @@ async def handle_poll(request: web.Request) -> web.Response:
         n = len(relay.poller_configs)
         return web.json_response(
             {"error": f"Poller {poll_idx_raw} not configured "
-             f"(relay {relay_name!r} has {n}, use 1–{n})"}, status=404,
+             f"(relay {relay_name!r} has {n}, use 1-{n})"}, status=404,
         )
 
     # Parse optional replay count from body
