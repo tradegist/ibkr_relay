@@ -3,7 +3,7 @@
 These tests require:
 1. ibkr_bridge running locally (make local-up in ibkr_bridge)
 2. BRIDGE_API_TOKEN set in .env.test (must match bridge's API_TOKEN)
-3. ibkr_relay E2E stack running (make e2e-up)
+3. broker-relay E2E stack running (make e2e-up)
 
 Tests SKIP (not fail) when the bridge is unavailable or unconfigured.
 """
@@ -84,7 +84,7 @@ def bridge_api() -> Iterator[httpx.Client]:
 
 @pytest.fixture(scope="session")
 def debug_api() -> Iterator[httpx.Client]:
-    """httpx client pointed at the ibkr-debug webhook inbox."""
+    """httpx client pointed at the debug webhook inbox."""
     with httpx.Client(
         base_url=DEBUG_INBOX_BASE,
         timeout=10.0,

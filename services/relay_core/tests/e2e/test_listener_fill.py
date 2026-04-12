@@ -2,7 +2,7 @@
 
 Requires:
 - ibkr_bridge running locally with IB Gateway connected (paper account)
-- ibkr_relay E2E stack running (make e2e-up)
+- broker-relay E2E stack running (make e2e-up)
 - BRIDGE_API_TOKEN set in .env.test
 
 The fill test places a market order for 1 share of AAPL via the bridge
@@ -16,18 +16,18 @@ import time
 import httpx
 import pytest
 
-from listener.tests.e2e.conftest import DEBUG_INBOX_PATH
+from relay_core.tests.e2e.conftest import DEBUG_INBOX_PATH
 
 _E2E_COMPOSE = (
     "docker compose -f docker-compose.yml -f docker-compose.test.yml "
-    "-p ibkr-relay-test --env-file .env.test"
+    "-p broker-relay-test --env-file .env.test"
 )
 
 
 def _get_listener_logs() -> str:
-    """Return recent poller container logs filtered for listener lines."""
+    """Return recent relays container logs filtered for listener lines."""
     result = subprocess.run(
-        f"{_E2E_COMPOSE} logs poller --since 2m",
+        f"{_E2E_COMPOSE} logs relays --since 2m",
         shell=True,
         capture_output=True,
         text=True,
