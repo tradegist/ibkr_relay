@@ -2,12 +2,6 @@
 
 *
 
-!services/poller/**
-services/poller/tests/
-services/poller/Dockerfile
-services/poller/**/test_*.py
-services/poller/**/__pycache__/
-
 !services/relay_core/**
 services/relay_core/Dockerfile
 services/relay_core/**/test_*.py

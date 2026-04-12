@@ -10,13 +10,11 @@ import os
 from collections.abc import Callable
 from typing import Any, cast
 
-from listener.bridge_models import WsEnvelope
 from notifier.base import BaseNotifier
-from poller.flex_parser import parse_fills
 from relay_core import (
     BrokerRelay,
-    FillHandler,
     ListenerConfig,
+    OnMessageResult,
     PollerConfig,
     get_debounce_ms,
     get_poll_interval,
@@ -24,6 +22,10 @@ from relay_core import (
     is_poller_enabled,
 )
 from shared import BuySell, Fill, Source, normalize_asset_class
+
+from .bridge_models import WsEnvelope
+from .flex_fetch import fetch_flex_report
+from .flex_parser import parse_fills
 
 log = logging.getLogger("relays.ibkr")
 
@@ -72,7 +74,6 @@ def _is_exec_events_enabled() -> bool:
 
 def _build_fetch(flex_token: str, flex_query_id: str) -> Callable[[], str | None]:
     """Return a fetch callable for the generic poller engine."""
-    from poller import fetch_flex_report
 
     def fetch() -> str | None:
         return fetch_flex_report(
@@ -141,7 +142,7 @@ def _map_fill(envelope: WsEnvelope) -> Fill | None:
     """
     if envelope.fill is None:
         log.error(
-            "Envelope seq=%d type=%s has no fill data",
+            "IBKR WsEnvelope seq=%d type=%s has no fill data",
             envelope.seq, envelope.type,
         )
         return None
@@ -208,29 +209,27 @@ def _on_message_factory(
     """Build an on_message callback with exec_events_enabled baked in."""
     async def handler(
         data: dict[str, Any],
-        send_and_mark: FillHandler,
-        send_no_mark: FillHandler,
-    ) -> None:
+    ) -> OnMessageResult:
         event_type = data.get("type")
 
         try:
             envelope = WsEnvelope.model_validate(data)
         except Exception:
-            log.exception("Failed to validate WsEnvelope (type=%s)", event_type)
-            return
+            log.exception("Failed to validate IBKR WsEnvelope (type=%s)", event_type)
+            return OnMessageResult()
 
         fill = _map_fill(envelope)
         if fill is None:
-            return
+            return OnMessageResult()
 
         if envelope.type == "execDetailsEvent":
             if not exec_events_enabled:
                 log.debug("Skipping execDetailsEvent (disabled)")
-                return
-            await send_no_mark(fill)
-        else:
-            # commissionReportEvent — full dedup pipeline
-            await send_and_mark(fill)
+                return OnMessageResult()
+            return OnMessageResult(fill=fill, mark=False)
+
+        # commissionReportEvent — full dedup pipeline
+        return OnMessageResult(fill=fill, mark=True)
 
     return handler
 

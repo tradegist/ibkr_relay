@@ -10,11 +10,11 @@ import asyncio
 import logging
 import sys
 
-from relay_core import BrokerRelay
-from relay_core.listener_engine import start_listener
-from relay_core.poller_engine import init_dedup_db, poll_once, prune_old
-from relay_core.registry import load_relays
-from relay_core.routes import start_api_server
+from . import BrokerRelay
+from .listener_engine import start_listener
+from .poller_engine import init_dedup_db, poll_once, prune_old
+from .registry import load_relays
+from .routes import start_api_server
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,15 +77,13 @@ async def amain() -> None:
     prune_old(dedup_conn)
     dedup_conn.close()
 
-    # Create per-poller locks
-    for relay in relays:
-        relay.poll_locks = [asyncio.Lock() for _ in relay.poller_configs]
-
     await start_api_server(relays)
 
-    # Start poll loops and listeners as background tasks
+    # Create per-poller locks and start poll loops + listeners
     for relay in relays:
+        relay.poll_locks = []
         for idx in range(len(relay.poller_configs)):
+            relay.poll_locks.append(asyncio.Lock())
             asyncio.create_task(  # noqa: RUF006
                 _poll_loop(relay, idx),
             )

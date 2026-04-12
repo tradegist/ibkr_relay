@@ -3,16 +3,8 @@
 import os
 import unittest
 from typing import Any, cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-from listener.bridge_models import (
-    WsCommissionReport,
-    WsContract,
-    WsEnvelope,
-    WsEventType,
-    WsExecution,
-    WsFill,
-)
 from relay_core import get_debounce_ms, get_poll_interval, is_listener_enabled
 from relays.ibkr import (
     _build_poller_configs,
@@ -25,6 +17,14 @@ from relays.ibkr import (
     _map_fill,
     _on_message_factory,
     build_relay,
+)
+from .bridge_models import (
+    WsCommissionReport,
+    WsContract,
+    WsEnvelope,
+    WsEventType,
+    WsExecution,
+    WsFill,
 )
 from shared import BuySell
 
@@ -233,58 +233,45 @@ class TestMapFill(unittest.TestCase):
 class TestOnMessage(unittest.IsolatedAsyncioTestCase):
     """Test the adapter's on_message callback dispatch logic."""
 
-    async def test_commission_calls_send_and_mark(self) -> None:
+    async def test_commission_returns_fill_with_mark(self) -> None:
         handler = _on_message_factory(exec_events_enabled=False)
         envelope = _make_envelope(event_type="commissionReportEvent")
         data: dict[str, Any] = envelope.model_dump()
 
-        send_and_mark = AsyncMock()
-        send_no_mark = AsyncMock()
+        result = await handler(data)
 
-        await handler(data, send_and_mark, send_no_mark)
+        self.assertIsNotNone(result.fill)
+        self.assertTrue(result.mark)
+        if result.fill is None:
+            raise RuntimeError("Expected fill to be set")
+        self.assertEqual(result.fill.execId, "0001")
 
-        send_and_mark.assert_called_once()
-        send_no_mark.assert_not_called()
-        fill = send_and_mark.call_args[0][0]
-        self.assertEqual(fill.execId, "0001")
-
-    async def test_exec_event_calls_send_no_mark_when_enabled(self) -> None:
+    async def test_exec_event_returns_fill_without_mark_when_enabled(self) -> None:
         handler = _on_message_factory(exec_events_enabled=True)
         envelope = _make_envelope(event_type="execDetailsEvent")
         data: dict[str, Any] = envelope.model_dump()
 
-        send_and_mark = AsyncMock()
-        send_no_mark = AsyncMock()
+        result = await handler(data)
 
-        await handler(data, send_and_mark, send_no_mark)
-
-        send_no_mark.assert_called_once()
-        send_and_mark.assert_not_called()
+        self.assertIsNotNone(result.fill)
+        self.assertFalse(result.mark)
 
     async def test_exec_event_skipped_when_disabled(self) -> None:
         handler = _on_message_factory(exec_events_enabled=False)
         envelope = _make_envelope(event_type="execDetailsEvent")
         data: dict[str, Any] = envelope.model_dump()
 
-        send_and_mark = AsyncMock()
-        send_no_mark = AsyncMock()
+        result = await handler(data)
 
-        await handler(data, send_and_mark, send_no_mark)
-
-        send_and_mark.assert_not_called()
-        send_no_mark.assert_not_called()
+        self.assertIsNone(result.fill)
 
     async def test_invalid_envelope_skipped(self) -> None:
         handler = _on_message_factory(exec_events_enabled=True)
         data: dict[str, Any] = {"type": "commissionReportEvent", "bad": "data"}
 
-        send_and_mark = AsyncMock()
-        send_no_mark = AsyncMock()
+        result = await handler(data)
 
-        await handler(data, send_and_mark, send_no_mark)
-
-        send_and_mark.assert_not_called()
-        send_no_mark.assert_not_called()
+        self.assertIsNone(result.fill)
 
 
 # ── Poller config tests ──────────────────────────────────────────────

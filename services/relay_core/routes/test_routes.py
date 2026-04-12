@@ -237,12 +237,7 @@ class TestGetApiPort(unittest.TestCase):
         from relay_core.routes import get_api_port
         self.assertEqual(get_api_port(), 9090)
 
-    @patch.dict(os.environ, {"API_PORT": "", "POLLER_API_PORT": "8888"}, clear=False)
-    def test_falls_back_to_poller_api_port(self) -> None:
-        from relay_core.routes import get_api_port
-        self.assertEqual(get_api_port(), 8888)
-
-    @patch.dict(os.environ, {"API_PORT": "", "POLLER_API_PORT": ""}, clear=False)
+    @patch.dict(os.environ, {"API_PORT": ""}, clear=False)
     def test_default_8000(self) -> None:
         from relay_core.routes import get_api_port
         self.assertEqual(get_api_port(), 8000)

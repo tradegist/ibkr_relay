@@ -9,6 +9,9 @@ mark-after-notify.  Zero broker knowledge.
 import asyncio
 import json
 import logging
+import os
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +23,77 @@ from notifier import notify
 from notifier.base import BaseNotifier
 from shared import Fill, RelayName, WebhookPayloadTrades, aggregate_fills
 
-from . import ListenerConfig
-
 log = logging.getLogger(__name__)
+
+
+# ── On-message result ────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class OnMessageResult:
+    """Return type for ListenerConfig.on_message.
+
+    *fill*: the parsed Fill, or None to skip the event.
+    *mark*: if True, use full dedup+notify+mark pipeline;
+            if False, fire-and-forget (no dedup, no mark).
+    """
+
+    fill: Fill | None = None
+    mark: bool = True
+
+
+# ── Listener configuration ───────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class ListenerConfig:
+    """Everything the generic WS listener engine needs from a broker adapter.
+
+    *ws_url*: WebSocket endpoint to connect to.
+    *api_token*: Bearer token for WS auth.
+    *on_message*: async callback that parses a raw WS JSON dict and returns
+        an ``OnMessageResult``. ``fill=None`` means skip; ``mark=True``
+        routes through dedup+notify+mark, ``mark=False`` is fire-and-forget.
+    *event_filter*: return True if the event should be processed, False to skip.
+    *debounce_ms*: milliseconds to buffer fills before flushing (0 = disabled).
+    """
+
+    ws_url: str
+    api_token: str
+    on_message: Callable[
+        [dict[str, Any]], Awaitable[OnMessageResult]
+    ]
+    event_filter: Callable[[dict[str, Any]], bool]
+    debounce_ms: int = 0
+
+
+# ── Relay-agnostic listener env var getters ──────────────────────────
+
+
+def is_listener_enabled(relay_name: RelayName) -> bool:
+    """Check {RELAY}_LISTENER_ENABLED, falling back to LISTENER_ENABLED."""
+    prefix = relay_name.upper()
+    val = os.environ.get(f"{prefix}_LISTENER_ENABLED", "").strip().lower()
+    if not val:
+        val = os.environ.get("LISTENER_ENABLED", "").strip().lower()
+    return val not in ("0", "false", "no", "")
+
+
+def get_debounce_ms(relay_name: RelayName) -> int:
+    """Read {RELAY}_LISTENER_DEBOUNCE_MS, falling back to LISTENER_DEBOUNCE_MS."""
+    prefix = relay_name.upper()
+    raw = os.environ.get(f"{prefix}_LISTENER_DEBOUNCE_MS", "").strip()
+    if not raw:
+        raw = os.environ.get("LISTENER_DEBOUNCE_MS", "0").strip()
+    try:
+        val = int(raw)
+    except ValueError:
+        raise SystemExit(
+            f"Invalid debounce time={raw!r} — must be an integer"
+        ) from None
+    if val < 0:
+        raise SystemExit(f"Invalid debounce time={val} — must be >= 0")
+    return val
 
 # ── Shared DB path (same as poller_engine) ───────────────────────────
 DEDUP_DB_PATH = "/data/dedup/fills.db"
@@ -208,9 +279,14 @@ async def _handle_event(
     if not config.event_filter(data):
         return
 
-    # Build dispatch handlers that the adapter can call with a Fill.
-    async def handle_send_and_mark(fill: Fill) -> None:
-        """Full pipeline: dedup + notify + mark (or debounce buffer)."""
+    result: OnMessageResult = await config.on_message(data)
+
+    if result.fill is None:
+        return
+
+    fill = result.fill
+
+    if result.mark:
         log.info(
             "[%s] Fill: %s %s execId=%s fee=%s",
             relay_name, fill.side.value, fill.symbol, fill.execId, fill.fee,
@@ -227,9 +303,7 @@ async def _handle_event(
                     "[%s] Failed to dispatch fill execId=%s",
                     relay_name, fill.execId,
                 )
-
-    async def handle_send_no_mark(fill: Fill) -> None:
-        """Fire-and-forget: aggregate + notify without dedup/mark."""
+    else:
         log.info(
             "[%s] Fill (no-mark): %s %s execId=%s",
             relay_name, fill.side.value, fill.symbol, fill.execId,
@@ -243,8 +317,6 @@ async def _handle_event(
                 "[%s] Failed to dispatch fill execId=%s",
                 relay_name, fill.execId,
             )
-
-    await config.on_message(data, handle_send_and_mark, handle_send_no_mark)
 
 
 # ── WebSocket listener loop ─────────────────────────────────────────

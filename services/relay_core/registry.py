@@ -12,8 +12,9 @@ from typing import get_args
 
 from notifier import load_notifiers
 from notifier.base import BaseNotifier
-from relay_core import BrokerRelay
 from shared import RelayName
+
+from . import BrokerRelay
 
 log = logging.getLogger("relay_registry")
 

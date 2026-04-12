@@ -1,4 +1,4 @@
-"""Authentication middleware for the poller HTTP API."""
+"""Auth middleware — Bearer token verification for authenticated routes."""
 
 import hmac
 import logging
@@ -7,18 +7,15 @@ from collections.abc import Awaitable, Callable
 
 from aiohttp import web
 
-log = logging.getLogger("poller")
-
-# Path prefix guarded by auth middleware. Route registration and middleware
-# must both reference this so they stay in sync.
-AUTH_PREFIX = "/ibkr"
-
-
-def get_api_token() -> str:
-    return os.environ.get("API_TOKEN", "").strip()
-
+log = logging.getLogger("routes.auth")
 
 _Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
+
+AUTH_PREFIX = "/relays"
+
+
+def _get_api_token() -> str:
+    return os.environ.get("API_TOKEN", "").strip()
 
 
 @web.middleware
@@ -28,7 +25,7 @@ async def auth_middleware(
 ) -> web.StreamResponse:
     """Verify Bearer token on all routes under AUTH_PREFIX."""
     if request.path.startswith(f"{AUTH_PREFIX}/"):
-        api_token = get_api_token()
+        api_token = _get_api_token()
         if not api_token:
             log.error("API_TOKEN not configured — rejecting request")
             return web.json_response({"error": "Server misconfigured"}, status=500)

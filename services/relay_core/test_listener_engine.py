@@ -5,7 +5,7 @@ import unittest
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from relay_core import FillHandler, ListenerConfig
+from relay_core import ListenerConfig, OnMessageResult
 from relay_core.listener_engine import (
     DebounceBuffer,
     _handle_event,
@@ -45,10 +45,9 @@ def _make_fill(
 
 async def _noop_on_message(
     data: dict[str, Any],
-    send_and_mark: FillHandler,
-    send_no_mark: FillHandler,
-) -> None:
+) -> OnMessageResult:
     """Default no-op on_message for tests that don't need it."""
+    return OnMessageResult()
 
 
 # ── Namespace helper tests ───────────────────────────────────────────
@@ -202,10 +201,11 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         called = False
 
         async def on_msg(
-            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
-        ) -> None:
+            data: dict[str, Any],
+        ) -> OnMessageResult:
             nonlocal called
             called = True
+            return OnMessageResult()
 
         config = ListenerConfig(
             ws_url="ws://localhost/ws", api_token="t",
@@ -217,16 +217,15 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(called)
 
-    async def test_on_message_receives_data_and_handlers(self) -> None:
-        """on_message is called with the raw data and both handlers."""
+    async def test_on_message_receives_data(self) -> None:
+        """on_message is called with the raw data."""
         captured: dict[str, Any] = {}
 
         async def on_msg(
-            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
-        ) -> None:
+            data: dict[str, Any],
+        ) -> OnMessageResult:
             captured["data"] = data
-            captured["sam"] = sam
-            captured["snm"] = snm
+            return OnMessageResult()
 
         config = ListenerConfig(
             ws_url="ws://localhost/ws", api_token="t",
@@ -238,20 +237,18 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             debounce_buf=None, db_path="/tmp/test.db",
         )
         self.assertEqual(captured["data"], data)
-        self.assertTrue(callable(captured["sam"]))
-        self.assertTrue(callable(captured["snm"]))
 
     @patch("relay_core.listener_engine._send_and_mark")
-    async def test_send_and_mark_handler_dispatches(
+    async def test_mark_true_dispatches_send_and_mark(
         self, mock_send: MagicMock,
     ) -> None:
-        """Calling send_and_mark handler triggers the dedup pipeline."""
+        """Returning mark=True triggers the dedup pipeline."""
         fill = _make_fill()
 
         async def on_msg(
-            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
-        ) -> None:
-            await sam(fill)
+            data: dict[str, Any],
+        ) -> OnMessageResult:
+            return OnMessageResult(fill=fill, mark=True)
 
         config = ListenerConfig(
             ws_url="ws://localhost/ws", api_token="t",
@@ -267,16 +264,16 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(call_args[1]), 1)
 
     @patch("relay_core.listener_engine._send_no_mark")
-    async def test_send_no_mark_handler_dispatches(
+    async def test_mark_false_dispatches_send_no_mark(
         self, mock_send: MagicMock,
     ) -> None:
-        """Calling send_no_mark handler triggers fire-and-forget dispatch."""
+        """Returning mark=False triggers fire-and-forget dispatch."""
         fill = _make_fill()
 
         async def on_msg(
-            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
-        ) -> None:
-            await snm(fill)
+            data: dict[str, Any],
+        ) -> OnMessageResult:
+            return OnMessageResult(fill=fill, mark=False)
 
         config = ListenerConfig(
             ws_url="ws://localhost/ws", api_token="t",
@@ -289,16 +286,16 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         mock_send.assert_called_once()
 
     @patch("relay_core.listener_engine._send_and_mark")
-    async def test_send_and_mark_uses_debounce_buffer(
+    async def test_mark_true_uses_debounce_buffer(
         self, mock_send: MagicMock,
     ) -> None:
-        """send_and_mark routes through debounce buffer when present."""
+        """mark=True routes through debounce buffer when present."""
         fill = _make_fill()
 
         async def on_msg(
-            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
-        ) -> None:
-            await sam(fill)
+            data: dict[str, Any],
+        ) -> OnMessageResult:
+            return OnMessageResult(fill=fill, mark=True)
 
         config = ListenerConfig(
             ws_url="ws://localhost/ws", api_token="t",
@@ -316,12 +313,12 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(buf._buffer), 1)
         mock_send.assert_not_called()
 
-    async def test_adapter_can_skip_by_not_calling_handlers(self) -> None:
-        """If on_message doesn't call any handler, nothing is dispatched."""
+    async def test_fill_none_skips_dispatch(self) -> None:
+        """If on_message returns fill=None, nothing is dispatched."""
         async def on_msg(
-            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
-        ) -> None:
-            pass  # Adapter decides to skip this event
+            data: dict[str, Any],
+        ) -> OnMessageResult:
+            return OnMessageResult()
 
         config = ListenerConfig(
             ws_url="ws://localhost/ws", api_token="t",
@@ -338,10 +335,11 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         called = False
 
         async def on_msg(
-            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
-        ) -> None:
+            data: dict[str, Any],
+        ) -> OnMessageResult:
             nonlocal called
             called = True
+            return OnMessageResult()
 
         config = ListenerConfig(
             ws_url="ws://localhost/ws", api_token="t",
@@ -358,10 +356,11 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         called = False
 
         async def on_msg(
-            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
-        ) -> None:
+            data: dict[str, Any],
+        ) -> OnMessageResult:
             nonlocal called
             called = True
+            return OnMessageResult()
 
         config = ListenerConfig(
             ws_url="ws://localhost/ws", api_token="t",
@@ -378,10 +377,11 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         called = False
 
         async def on_msg(
-            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
-        ) -> None:
+            data: dict[str, Any],
+        ) -> OnMessageResult:
             nonlocal called
             called = True
+            return OnMessageResult()
 
         config = ListenerConfig(
             ws_url="ws://localhost/ws", api_token="t",
@@ -398,10 +398,11 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         called = False
 
         async def on_msg(
-            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
-        ) -> None:
+            data: dict[str, Any],
+        ) -> OnMessageResult:
             nonlocal called
             called = True
+            return OnMessageResult()
 
         config = ListenerConfig(
             ws_url="ws://localhost/ws", api_token="t",
@@ -418,10 +419,11 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         called = False
 
         async def on_msg(
-            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
-        ) -> None:
+            data: dict[str, Any],
+        ) -> OnMessageResult:
             nonlocal called
             called = True
+            return OnMessageResult()
 
         config = ListenerConfig(
             ws_url="ws://localhost/ws", api_token="t",

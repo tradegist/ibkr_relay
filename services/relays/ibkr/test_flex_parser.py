@@ -1,10 +1,9 @@
-"""Comprehensive tests for poller/flex_parser.py."""
+"""Comprehensive tests for IBKR Flex XML parser."""
 
 import pytest
 
-from poller.flex_parser import parse_fills
-from poller_models import BuySell, Fill, Trade
-from shared import aggregate_fills
+from relays.ibkr.flex_parser import parse_fills
+from shared import BuySell, Fill, Trade, aggregate_fills
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 

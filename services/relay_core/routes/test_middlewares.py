@@ -7,7 +7,7 @@ from unittest.mock import patch
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase
 
-from poller_routes.middlewares import auth_middleware
+from relay_core.routes.middlewares import AUTH_PREFIX, auth_middleware
 
 
 async def _ok_handler(request: web.Request) -> web.Response:
@@ -20,7 +20,7 @@ class TestAuthMiddleware(AioHTTPTestCase):
     async def get_application(self) -> web.Application:
         app = web.Application(middlewares=[auth_middleware])
         app.router.add_get("/health", _ok_handler)
-        app.router.add_get("/ibkr/poller/run", _ok_handler)
+        app.router.add_get(f"{AUTH_PREFIX}/ibkr/poll/1", _ok_handler)
         return app
 
     @patch.dict(os.environ, {"API_TOKEN": "test-token"})
@@ -30,13 +30,13 @@ class TestAuthMiddleware(AioHTTPTestCase):
 
     @patch.dict(os.environ, {"API_TOKEN": "test-token"})
     async def test_missing_auth_header(self) -> None:
-        resp = await self.client.request("GET", "/ibkr/poller/run")
+        resp = await self.client.request("GET", f"{AUTH_PREFIX}/ibkr/poll/1")
         self.assertEqual(resp.status, 401)
 
     @patch.dict(os.environ, {"API_TOKEN": "test-token"})
     async def test_invalid_token(self) -> None:
         resp = await self.client.request(
-            "GET", "/ibkr/poller/run",
+            "GET", f"{AUTH_PREFIX}/ibkr/poll/1",
             headers={"Authorization": "Bearer wrong-token"},
         )
         self.assertEqual(resp.status, 401)
@@ -44,7 +44,7 @@ class TestAuthMiddleware(AioHTTPTestCase):
     @patch.dict(os.environ, {"API_TOKEN": "valid-token"})
     async def test_valid_token(self) -> None:
         resp = await self.client.request(
-            "GET", "/ibkr/poller/run",
+            "GET", f"{AUTH_PREFIX}/ibkr/poll/1",
             headers={"Authorization": "Bearer valid-token"},
         )
         self.assertEqual(resp.status, 200)
@@ -53,7 +53,7 @@ class TestAuthMiddleware(AioHTTPTestCase):
     async def test_empty_api_token_rejects_all(self) -> None:
         """Empty API_TOKEN must return 500, not silently accept empty Bearer."""
         resp = await self.client.request(
-            "GET", "/ibkr/poller/run",
+            "GET", f"{AUTH_PREFIX}/ibkr/poll/1",
             headers={"Authorization": "Bearer "},
         )
         self.assertEqual(resp.status, 500)

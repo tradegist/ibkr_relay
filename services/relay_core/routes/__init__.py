@@ -6,53 +6,23 @@ Routes:
 """
 
 import asyncio
-import hmac
 import logging
 import os
-from collections.abc import Awaitable, Callable
 
 from aiohttp import web
 
-from relay_core import BrokerRelay
-from relay_core.poller_engine import poll_once
+from .. import BrokerRelay
+from ..poller_engine import poll_once
+from ..relay_models import HealthResponse, RunPollResponse
+from .middlewares import AUTH_PREFIX, auth_middleware
 
 log = logging.getLogger("routes")
-
-_Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
-
-
-# ── Auth ─────────────────────────────────────────────────────────────
-
-AUTH_PREFIX = "/relays"
-
-
-def _get_api_token() -> str:
-    return os.environ.get("API_TOKEN", "").strip()
-
-
-@web.middleware
-async def auth_middleware(
-    request: web.Request,
-    handler: _Handler,
-) -> web.StreamResponse:
-    """Verify Bearer token on all routes under AUTH_PREFIX."""
-    if request.path.startswith(f"{AUTH_PREFIX}/"):
-        api_token = _get_api_token()
-        if not api_token:
-            log.error("API_TOKEN not configured — rejecting request")
-            return web.json_response({"error": "Server misconfigured"}, status=500)
-        auth = request.headers.get("Authorization", "")
-        if not hmac.compare_digest(auth, f"Bearer {api_token}"):
-            return web.json_response({"error": "Unauthorized"}, status=401)
-    return await handler(request)
-
-
-# ── Handlers ─────────────────────────────────────────────────────────
 
 
 async def handle_health(request: web.Request) -> web.Response:
     """GET /health — unauthenticated status check."""
-    return web.json_response({"status": "ok"})
+    resp = HealthResponse(status="ok")
+    return web.json_response(resp.model_dump())
 
 
 async def handle_poll(request: web.Request) -> web.Response:
@@ -93,7 +63,7 @@ async def handle_poll(request: web.Request) -> web.Response:
         body = await request.json()
         replay = int(body.get("replay") or 0)
     except Exception:
-        pass
+        pass # no body or malformed — use env defaults
 
     # Acquire the per-poller lock (fail-fast if already running)
     poll_lock = relay.poll_locks[poll_idx] if relay.poll_locks else None
@@ -114,9 +84,8 @@ async def handle_poll(request: web.Request) -> web.Response:
             replay=replay,
         )
 
-        return web.json_response({
-            "trades": [t.model_dump() for t in trades],
-        })
+        resp = RunPollResponse(trades=trades)
+        return web.json_response(resp.model_dump())
     except Exception as exc:
         log.exception("On-demand poll failed for relay %s poller %s", relay_name, poll_idx_raw)
         return web.json_response({"error": str(exc)}, status=500)
@@ -131,8 +100,6 @@ async def handle_poll(request: web.Request) -> web.Response:
 def get_api_port() -> int:
     """Read API_PORT from env (default 8000)."""
     raw = os.environ.get("API_PORT", "").strip()
-    if not raw:
-        raw = os.environ.get("POLLER_API_PORT", "").strip()
     if not raw:
         return 8000
     try:

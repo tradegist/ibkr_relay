@@ -1,4 +1,4 @@
-.PHONY: setup deploy destroy pause resume sync poll poll2 test-webhook types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats ssh help
+.PHONY: setup deploy destroy pause resume sync poll test-webhook types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats ssh help
 
 PROJECT = ibkr-relay
 PYTHON ?= .venv/bin/python3
@@ -13,9 +13,8 @@ help: ## Show available commands
 
 setup: ## Create .venv and install all dependencies
 	@test -d .venv || python3 -m venv .venv
-	.venv/bin/pip install -r requirements-dev.txt -r services/poller/requirements.txt
-	@echo "$(CURDIR)/services/poller" > $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
-	@echo "$(CURDIR)/services/debug" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
+	.venv/bin/pip install -r requirements-dev.txt -r services/relay_core/requirements.txt
+	@echo "$(CURDIR)/services/debug" > $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 	@echo "$(CURDIR)/services" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 	@echo "$(CURDIR)/services/relay_core" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 
@@ -50,29 +49,28 @@ test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2]
 types: ## Regenerate TypeScript + Python types from Pydantic models
 	PYTHONPATH=services $(PYTHON) schema_gen.py shared > types/typescript/shared/types.schema.json
 	npx --yes json-schema-to-typescript types/typescript/shared/types.schema.json > types/typescript/shared/types.d.ts
-	PYTHONPATH=services/poller:services $(PYTHON) schema_gen.py poller_models > types/typescript/poller/types.schema.json
-	npx --yes json-schema-to-typescript types/typescript/poller/types.schema.json > types/typescript/poller/types.d.ts
-	@echo "Generated types/typescript/shared/types.d.ts + types/typescript/poller/types.d.ts"
+	PYTHONPATH=services/relay_core:services $(PYTHON) schema_gen.py relay_models > types/typescript/relay_api/types.schema.json
+	npx --yes json-schema-to-typescript types/typescript/relay_api/types.schema.json > types/typescript/relay_api/types.d.ts
+	@echo "Generated types/typescript/shared/types.d.ts + types/typescript/relay_api/types.d.ts"
 	$(PYTHON) gen_python_types.py
 
 test: ## Run unit tests
-	PYTHONPATH=.:services/poller:services:services/debug $(PYTHON) -m pytest -v
+	PYTHONPATH=.:services:services/debug $(PYTHON) -m pytest -v
 
 typecheck: ## Run mypy strict type checking
-	MYPYPATH=services/poller:services $(PYTHON) -m mypy services/poller/ cli/test_webhook.py
+	MYPYPATH=services/relay_core:services $(PYTHON) -m mypy services/relay_core/relay_models.py cli/test_webhook.py
 	MYPYPATH=services $(PYTHON) -m mypy services/notifier/
 	MYPYPATH=services $(PYTHON) -m mypy services/dedup/
 	MYPYPATH=services $(PYTHON) -m mypy services/shared/
-	MYPYPATH=services $(PYTHON) -m mypy services/listener/
 	MYPYPATH=services $(PYTHON) -m mypy services/relay_core/
-	MYPYPATH=services/poller:services $(PYTHON) -m mypy services/relays/
+	MYPYPATH=services $(PYTHON) -m mypy services/relays/
 	MYPYPATH=services/debug $(PYTHON) -m mypy services/debug/
 	$(PYTHON) -m mypy schema_gen.py
 	$(PYTHON) -m mypy gen_python_types.py
 	$(PYTHON) -m mypy types/python/ibkr_relay_types/
 
 lint: ## Run ruff linter (use FIX=1 to auto-fix)
-	$(PYTHON) -m ruff check services/poller/ services/notifier/ services/dedup/ services/shared/ services/listener/ services/relay_core/ services/relays/ services/debug/ cli/ schema_gen.py gen_python_types.py types/python/ibkr_relay_types/ $(if $(FIX),--fix)
+	$(PYTHON) -m ruff check services/notifier/ services/dedup/ services/shared/ services/listener/ services/relay_core/ services/relays/ services/debug/ cli/ schema_gen.py gen_python_types.py types/python/ibkr_relay_types/ $(if $(FIX),--fix)
 	@if grep -rn '__all__' services/ types/ cli/ --include='*.py'; then echo "ERROR: __all__ is banned — use explicit re-exports"; exit 1; fi
 
 local-up: ## Start full stack locally (no TLS, direct port access)
@@ -121,7 +119,7 @@ e2e-down: ## Stop and remove E2E test stack
 
 e2e-run: ## Run E2E tests (stack must be up)
 	@$(E2E_COMPOSE) restart relays ibkr-debug > /dev/null 2>&1 && sleep 3
-	$(PYTHON) -m pytest services/poller/tests/e2e/ services/listener/tests/e2e/ -v
+	$(PYTHON) -m pytest services/listener/tests/e2e/ -v
 
 e2e: ## Run E2E tests (starts/stops stack automatically)
 	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — run: cp .env.test.example .env.test (placeholder values are fine)"; exit 1; }
