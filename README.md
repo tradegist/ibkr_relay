@@ -623,6 +623,12 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 │   │   ├── poller_engine.py       # Generic poller (dedup, fetch, parse, notify, mark)
 │   │   ├── listener_engine.py     # Generic WS listener (connect, dedup, notify, reconnect)
 │   │   ├── relay_models.py        # Re-export shim (shared models + RunPollResponse, HealthResponse)
+│   │   ├── dedup/                 # SQLite dedup library
+│   │   │   └── __init__.py        # init_db(), is_processed(), mark_processed(), prune()
+│   │   ├── notifier/              # Pluggable notification backends
+│   │   │   ├── __init__.py        # Registry, load_notifiers(), validate_notifier_env(), notify()
+│   │   │   ├── base.py            # BaseNotifier ABC
+│   │   │   └── webhook.py         # WebhookNotifier: HMAC-SHA256 signed HTTP POST
 │   │   ├── routes/                # HTTP API
 │   │   │   ├── __init__.py        # create_app(), start_api_server(), handle_health, handle_poll
 │   │   │   └── middlewares.py     # Auth middleware (Bearer token, AUTH_PREFIX=/relays)
@@ -640,12 +646,6 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 │   │   ├── __init__.py            # Barrel: re-exports models + utilities
 │   │   ├── models.py              # Pydantic models (Fill, Trade, WebhookPayload, BuySell, RelayName)
 │   │   └── utilities.py           # Internal helpers (aggregate_fills, normalize_*, _dedup_id)
-│   ├── notifier/                  # Pluggable notification backends (library, no container)
-│   │   ├── __init__.py            # Registry, load_notifiers(), validate_notifier_env(), notify()
-│   │   ├── base.py                # BaseNotifier ABC
-│   │   └── webhook.py             # WebhookNotifier: HMAC-SHA256 signed HTTP POST
-│   ├── dedup/                     # SQLite dedup library (library, no container)
-│   │   └── __init__.py            # init_db(), is_processed(), mark_processed(), prune()
 │   └── debug/                     # Debug webhook inbox service
 │       ├── debug_app.py           # aiohttp app: POST/GET/DELETE /debug/webhook/{path}
 │       ├── Dockerfile

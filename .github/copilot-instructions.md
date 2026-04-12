@@ -104,7 +104,7 @@ Broker Relay is a **relay between broker accounts** that provides clear, common 
 - **`.venv` is the project's virtual environment.** Created by `make setup` using Homebrew Python. All dev dependencies are installed there.
 - **Auto-activation** is configured in `~/.zshrc` via a `chpwd` hook — the venv activates automatically when `cd`'ing into the project directory.
 - **`make setup`** creates the `.venv` (if missing), installs all dependencies (`requirements-dev.txt` + `services/relay_core/requirements.txt`), writes a `.pth` file, and copies `env_examples/*` → `.<name>` (e.g. `env_examples/env` → `.env`) for any missing env files.
-- **`broker-relay.pth`** is created inside `.venv/lib/pythonX.Y/site-packages/` by `make setup`. It adds `services/debug/`, `services/`, and `services/relay_core/` to `sys.path` so that `from relay_core import ...`, `from debug_app import ...`, `from notifier import ...`, and `from shared import ...` work everywhere (CLI, tests, scripts) without `sys.path` hacks or `PYTHONPATH`.
+- **`broker-relay.pth`** is created inside `.venv/lib/pythonX.Y/site-packages/` by `make setup`. It adds `services/debug/`, `services/`, and `services/relay_core/` to `sys.path` so that `from relay_core import ...`, `from relay_core.dedup import ...`, `from relay_core.notifier import ...`, `from debug_app import ...`, and `from shared import ...` work everywhere (CLI, tests, scripts) without `sys.path` hacks or `PYTHONPATH`.
 - **`.venv/` is gitignored** — never commit it.
 - **`docker-compose.local.yml` adds bind mounts** that shadow the `COPY`'d files in the image with your local source tree (`:ro`). This means code changes are visible on container restart — no rebuild needed. `make local-up` builds the images once; after that, `make sync` (when `DEFAULT_CLI_RELAY_ENV=local`) just restarts containers.
 - **`make sync` respects `DEFAULT_CLI_RELAY_ENV`.** When set to `local`, `make sync` restarts the local compose stack. When `prod` (default), it runs the full CLI sync to the droplet. Override per-command with `ENV=local` or `ENV=prod`.
@@ -135,7 +135,6 @@ Configuration is split into three env files to separate concerns and enable scal
 - **`.dockerignore` uses an allowlist** (`*` to exclude everything, then `!services/<module>/**` for each module). Tests, `__pycache__`, and Dockerfiles are re-excluded. This means adding new source files within an existing module requires **no** `.dockerignore` changes.
 - **When adding a new standalone module** (e.g. `services/foo/`), you must add `!services/foo/**` plus test/pycache exclusions to `.dockerignore` — the allowlist excludes everything by default. Also add the corresponding `COPY` to the Dockerfile. Without this, the build context won't include the new module.
 - The relay_core Dockerfile uses directory COPYs (`COPY services/relay_core/ ./relay_core/`, `COPY services/relays/ ./relays/`) so new files are picked up automatically.
-- **Never nest bind mounts in compose override files.** If a service mounts `./services/relay_core:/app/relay_core` and you also need `services/notifier/` available, do NOT mount it inside the first mount path. Docker will auto-create an empty directory on the host to back the nested mount point. On `docker compose restart`, this empty host directory shadows the real content, causing `ImportError`. Instead, mount the extra module at a separate path outside the existing mount.
 
 ## Architecture
 
@@ -301,6 +300,12 @@ services/relay_core/
   poller_engine.py         # Generic poller: init_dedup_db, init_meta_db, poll_once, prune_old
   listener_engine.py       # Generic WS listener: connect, dedup, notify, reconnect with backoff
   relay_models.py          # Re-export shim for shared models + relay-specific API types (RunPollResponse, HealthResponse)
+  dedup/                   # SQLite dedup library
+    __init__.py            # init_db(), is_processed(), mark_processed(), prune()
+  notifier/                # Pluggable notification backends
+    __init__.py            # Registry, load_notifiers(), validate_notifier_env(), notify()
+    base.py                # BaseNotifier ABC
+    webhook.py             # WebhookNotifier: HMAC-SHA256 signed HTTP POST
   routes/                  # HTTP API
     __init__.py            # Orchestrator: create_app(), start_api_server(), handle_health, handle_poll
     middlewares.py         # Auth middleware (Bearer token, AUTH_PREFIX=/relays)
@@ -334,12 +339,12 @@ services/relays/ibkr/
 - **Multi-account support** via `_2` suffixed env vars (e.g. `IBKR_FLEX_QUERY_ID_2`). Each suffix produces an additional `PollerConfig` within the same relay — no separate container needed. Triggered via `make poll RELAY=ibkr IDX=2` or `POST /relays/ibkr/poll/2`.
 - **Relay-specific overrides** — env vars like `IBKR_NOTIFIERS`, `IBKR_TARGET_WEBHOOK_URL` override the generic equivalents for the IBKR relay only, allowing different webhook destinations per broker.
 
-## Notifier Structure
+## Notifier Package
 
-The `services/notifier/` package is a **standalone library** (no container, no Dockerfile). It provides a pluggable notification backend system used by all relays.
+The `services/relay_core/notifier/` package provides a pluggable notification backend system used by all relays.
 
 ```
-services/notifier/
+services/relay_core/notifier/
   __init__.py              # Registry, load_notifiers(), validate_notifier_env(), notify()
   base.py                  # BaseNotifier ABC (name, required_env_vars, send, default env validation)
   webhook.py               # WebhookNotifier: HMAC-SHA256 signed HTTP POST
@@ -352,7 +357,7 @@ services/notifier/
 - **Suffix support** — `_2` suffixed env vars enable separate webhook destinations for multi-account pollers within a single relay.
 - **Validation belongs in each notifier's `__init__`, not the coordinator.** The coordinator (`__init__.py`) is a registry + dispatcher — it must not contain backend-specific validation logic. Each `BaseNotifier` subclass validates its own env vars in its constructor and raises `SystemExit` on misconfiguration.
 - **`validate_notifier_env()`** is called by `cli/__init__.py` during pre-deploy checks. It instantiates each configured backend (triggering constructor validation) and converts `SystemExit` to a `die()` call for CLI-friendly output.
-- **Adding a new backend** — create `services/notifier/<name>.py` with a class extending `BaseNotifier`, add it to `REGISTRY` in `__init__.py`. The constructor must validate all required env vars.
+- **Adding a new backend** — create `services/relay_core/notifier/<name>.py` with a class extending `BaseNotifier`, add it to `REGISTRY` in `__init__.py`. The constructor must validate all required env vars.
 - **The relay engines call `notify(notifiers, payload)`** — notifiers are loaded once at startup and passed through. The engines have no direct knowledge of webhook delivery mechanics.
 - **Debug webhook URL resolution** — `WebhookNotifier.__init__` calls `_resolve_webhook_url()`. If `DEBUG_WEBHOOK_PATH` is set, the URL is overridden to `http://debug:9000/debug/webhook/{path}` (container-to-container DNS). Otherwise, it reads `TARGET_WEBHOOK_URL`. No env var mutation occurs — the resolved URL is stored in `self._url`.
 
@@ -376,12 +381,12 @@ services/debug/
 - **Port 9000** is hardcoded (`HTTP_PORT = 9000`). In production, Caddy reverse-proxies to `debug:9000` — no host port mapping needed. Local dev uses `15003:9000` (`docker-compose.local.yml`), E2E uses `15012:9000` (`docker-compose.test.yml`).
 - **Module name**: `debug_app.py` (not `main.py`) to avoid `sys.modules` collisions when both are on `sys.path`.
 
-## Dedup Structure
+## Dedup Package
 
-The `services/dedup/` package is a **standalone library** (no container, no Dockerfile). It provides SQLite dedup logic used by the poller and listener engines.
+The `services/relay_core/dedup/` package provides SQLite dedup logic used by the poller and listener engines.
 
 ```
-services/dedup/
+services/relay_core/dedup/
   __init__.py              # init_db(), is_processed(), mark_processed(), get_processed_ids(), mark_processed_batch(), prune()
   test_dedup.py            # Tests for dedup module
 ```
@@ -548,6 +553,12 @@ services/                  # Business-logic services
     poller_engine.py       # Generic poller (dedup, fetch, parse, notify, mark)
     listener_engine.py     # Generic WS listener (connect, dedup, notify, reconnect)
     relay_models.py        # Re-export shim (shared models + RunPollResponse, HealthResponse)
+    dedup/                 # SQLite dedup library
+      __init__.py          # init_db(), is_processed(), mark_processed(), prune()
+    notifier/              # Pluggable notification backends
+      __init__.py          # Registry, load_notifiers(), validate_notifier_env(), notify()
+      base.py              # BaseNotifier ABC
+      webhook.py           # WebhookNotifier: HMAC-SHA256 signed HTTP POST
     routes/                # HTTP API
       __init__.py          # create_app(), start_api_server(), handle_health, handle_poll
       middlewares.py       # Auth middleware (Bearer token, AUTH_PREFIX=/relays)
@@ -566,12 +577,6 @@ services/                  # Business-logic services
     __init__.py            # Barrel: re-exports models + utilities
     models.py              # Pydantic models (Fill, Trade, WebhookPayload, BuySell, RelayName)
     utilities.py           # Internal helpers (aggregate_fills, normalize_*, _dedup_id)
-  notifier/                # Pluggable notification backends (library, no container)
-    __init__.py            # Registry, load_notifiers(), validate_notifier_env(), notify()
-    base.py                # BaseNotifier ABC
-    webhook.py             # WebhookNotifier: HMAC-SHA256 signed HTTP POST
-  dedup/                   # SQLite dedup library (library, no container)
-    __init__.py            # init_db(), is_processed(), mark_processed(), prune()
   debug/                   # Debug webhook inbox service
     debug_app.py           # aiohttp app: POST/GET/DELETE /debug/webhook/{path}
     Dockerfile
