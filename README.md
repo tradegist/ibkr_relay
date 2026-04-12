@@ -736,7 +736,7 @@ The Kraken poller calls the `TradesHistory` REST endpoint at the configured inte
 Enable the WebSocket v2 listener for near-instant fill delivery:
 
 ```env
-# .env
+# .env.relays
 KRAKEN_LISTENER_ENABLED=true
 ```
 

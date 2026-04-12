@@ -104,6 +104,15 @@ class KrakenClient:
         the opaque token string for WS v2 subscription auth.
         """
         result = self._request("/0/private/GetWebSocketsToken")
-        token: str = result["token"]
+        if not isinstance(result, dict) or "token" not in result:
+            raise RuntimeError(
+                "GetWebSocketsToken returned unexpected payload: "
+                f"{result!r:.200}"
+            )
+        token = result["token"]
+        if not isinstance(token, str) or not token:
+            raise RuntimeError(
+                f"GetWebSocketsToken returned invalid token value: {token!r}"
+            )
         log.info("Obtained Kraken WebSocket token")
         return token
