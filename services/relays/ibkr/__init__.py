@@ -25,11 +25,10 @@ from relay_core import (
 )
 from shared import BuySell, Fill, Source
 
-from .utilities import normalize_asset_class
-
 from .bridge_models import WsEnvelope
 from .flex_fetch import fetch_flex_report
 from .flex_parser import parse_fills
+from .utilities import normalize_asset_class
 
 log = logging.getLogger("relays.ibkr")
 
