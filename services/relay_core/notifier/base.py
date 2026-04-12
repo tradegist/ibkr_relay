@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 
 from pydantic import BaseModel
 
-from ..env import get_env
+from relay_core.env import get_env
 
 log = logging.getLogger("notifier.base")
 
@@ -52,5 +52,5 @@ class BaseNotifier(ABC):
 
     @abstractmethod
     def send(self, payload: BaseModel) -> None:
-        """Deliver the notification. Log errors internally, never raise."""
+        """Deliver the notification. Raise on failure so callers can retry."""
         ...

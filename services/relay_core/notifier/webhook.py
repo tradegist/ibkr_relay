@@ -8,7 +8,8 @@ import os
 import httpx
 from pydantic import BaseModel
 
-from ..env import get_env
+from relay_core.env import get_env
+
 from .base import BaseNotifier
 
 log = logging.getLogger("notifier.webhook")
@@ -125,20 +126,18 @@ class WebhookNotifier(BaseNotifier):
             self._secret.encode(), body.encode(), hashlib.sha256
         ).hexdigest()
 
-        try:
-            headers: dict[str, str] = {
-                "Content-Type": "application/json",
-                "X-Signature-256": f"sha256={signature}",
-            }
-            if self._header_name:
-                headers[self._header_name] = self._header_value
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            "X-Signature-256": f"sha256={signature}",
+        }
+        if self._header_name:
+            headers[self._header_name] = self._header_value
 
-            resp = httpx.post(
-                self._url,
-                content=body,
-                headers=headers,
-                timeout=10.0,
-            )
-            log.info("Webhook sent — status %d", resp.status_code)
-        except httpx.HTTPError as exc:
-            log.error("Webhook delivery failed: %s", exc)
+        resp = httpx.post(
+            self._url,
+            content=body,
+            headers=headers,
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        log.info("Webhook sent — status %d", resp.status_code)

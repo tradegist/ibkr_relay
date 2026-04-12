@@ -68,11 +68,11 @@ class TestWebhookNotifier:
         assert headers["X-Custom"] == "my-value"
 
     @patch("notifier.webhook.httpx.post")
-    def test_http_error_does_not_raise(self, mock_post: MagicMock) -> None:
-        """Webhook delivery failure is logged, not raised."""
+    def test_network_error_raises(self, mock_post: MagicMock) -> None:
+        """Network failure propagates so callers can retry."""
         import httpx
 
-        mock_post.side_effect = httpx.HTTPError("connection refused")
+        mock_post.side_effect = httpx.ConnectError("connection refused")
         env = {
             "TARGET_WEBHOOK_URL": "https://example.com/hook",
             "WEBHOOK_SECRET": "s",
@@ -80,7 +80,50 @@ class TestWebhookNotifier:
         with patch.dict("os.environ", env, clear=True):
             notifier = WebhookNotifier()
 
-        notifier.send(_SamplePayload(symbol="AAPL", quantity=1))
+        with pytest.raises(httpx.ConnectError):
+            notifier.send(_SamplePayload(symbol="AAPL", quantity=1))
+
+    @patch("notifier.webhook.httpx.post")
+    def test_5xx_raises_status_error(self, mock_post: MagicMock) -> None:
+        """Server error (5xx) propagates via raise_for_status()."""
+        import httpx
+
+        resp = MagicMock()
+        resp.status_code = 500
+        resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "500", request=MagicMock(), response=resp,
+        )
+        mock_post.return_value = resp
+        env = {
+            "TARGET_WEBHOOK_URL": "https://example.com/hook",
+            "WEBHOOK_SECRET": "s",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier()
+
+        with pytest.raises(httpx.HTTPStatusError):
+            notifier.send(_SamplePayload(symbol="AAPL", quantity=1))
+
+    @patch("notifier.webhook.httpx.post")
+    def test_4xx_raises_status_error(self, mock_post: MagicMock) -> None:
+        """Client error (4xx) propagates immediately."""
+        import httpx
+
+        resp = MagicMock()
+        resp.status_code = 400
+        resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "400", request=MagicMock(), response=resp,
+        )
+        mock_post.return_value = resp
+        env = {
+            "TARGET_WEBHOOK_URL": "https://example.com/hook",
+            "WEBHOOK_SECRET": "s",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier()
+
+        with pytest.raises(httpx.HTTPStatusError):
+            notifier.send(_SamplePayload(symbol="AAPL", quantity=1))
 
     @patch("notifier.webhook.httpx.post")
     def test_suffix_reads_suffixed_vars(self, mock_post: MagicMock) -> None:
