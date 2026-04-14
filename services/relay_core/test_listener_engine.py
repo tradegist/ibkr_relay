@@ -1,7 +1,10 @@
 """Tests for the generic WS listener engine."""
 
 import asyncio
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -9,6 +12,7 @@ import aiohttp
 
 from relay_core import ListenerConfig, OnMessageResult
 from relay_core.context import get_relay
+from relay_core.dedup import get_processed_ids, init_db, mark_processed_batch
 from relay_core.listener_engine import (
     DebounceBuffer,
     _handle_event,
@@ -184,6 +188,104 @@ class TestSendAndMark(unittest.TestCase):
             _send_and_mark("ibkr", [fill], "/tmp/test.db")
 
         mock_conn.close.assert_called_once()
+
+
+# ── _send_and_mark with REAL SQLite (in-memory-style file) ──────────
+
+
+class TestSendAndMarkRealDb(unittest.TestCase):
+    """Exercise the full dedup pipeline against a real SQLite DB."""
+
+    def setUp(self) -> None:
+        self._tmp_dir = tempfile.mkdtemp()
+        self._db_path = str(Path(self._tmp_dir) / "test.db")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    @patch("relay_core.listener_engine.notify")
+    def test_new_fill_persisted_in_real_db(self, mock_notify: MagicMock) -> None:
+        """End-to-end: new fill triggers notify and is written to the dedup DB."""
+        fill = _make_fill(exec_id="REAL_1")
+        _send_and_mark("ibkr", [fill], self._db_path)
+
+        mock_notify.assert_called_once()
+        conn = init_db(Path(self._db_path))
+        try:
+            seen = get_processed_ids(conn, {"ibkr:REAL_1"})
+            self.assertEqual(seen, {"ibkr:REAL_1"})
+        finally:
+            conn.close()
+
+    @patch("relay_core.listener_engine.notify")
+    def test_same_fill_twice_only_notifies_once(
+        self, mock_notify: MagicMock,
+    ) -> None:
+        """Sending the same fill twice — the second call is deduped against the real DB."""
+        fill = _make_fill(exec_id="DUP")
+        _send_and_mark("ibkr", [fill], self._db_path)
+        _send_and_mark("ibkr", [fill], self._db_path)
+        mock_notify.assert_called_once()
+
+    @patch("relay_core.listener_engine.notify")
+    def test_mixed_batch_only_new_fills_processed(
+        self, mock_notify: MagicMock,
+    ) -> None:
+        """A batch with seen + new fills: only new ones are notified and marked."""
+        # Pre-mark one fill in the real DB
+        conn = init_db(Path(self._db_path))
+        try:
+            mark_processed_batch(conn, ["ibkr:SEEN"])
+        finally:
+            conn.close()
+
+        seen = _make_fill(exec_id="SEEN")
+        new1 = _make_fill(exec_id="NEW1")
+        new2 = _make_fill(exec_id="NEW2")
+        _send_and_mark("ibkr", [seen, new1, new2], self._db_path)
+
+        mock_notify.assert_called_once()
+        payload = mock_notify.call_args[0][1]
+        sent_exec_ids = {eid for t in payload.data for eid in t.execIds}
+        # SEEN must be excluded; only the two new IDs were dispatched
+        self.assertEqual(sent_exec_ids, {"NEW1", "NEW2"})
+
+        # All three are now in the DB (SEEN pre-existing, NEW1+NEW2 newly marked)
+        conn = init_db(Path(self._db_path))
+        try:
+            all_seen = get_processed_ids(
+                conn, {"ibkr:SEEN", "ibkr:NEW1", "ibkr:NEW2"},
+            )
+            self.assertEqual(
+                all_seen, {"ibkr:SEEN", "ibkr:NEW1", "ibkr:NEW2"},
+            )
+        finally:
+            conn.close()
+
+    @patch(
+        "relay_core.listener_engine.notify",
+        side_effect=RuntimeError("notify down"),
+    )
+    def test_notify_failure_does_not_mark(
+        self, mock_notify: MagicMock,
+    ) -> None:
+        """Mark-after-notify guarantee: if notify raises, the fill must NOT be marked.
+
+        Verified against the real DB to ensure the contract holds end-to-end.
+        """
+        fill = _make_fill(exec_id="NOTIFY_FAIL")
+        with self.assertRaises(RuntimeError):
+            _send_and_mark("ibkr", [fill], self._db_path)
+
+        # notify was called (and raised) — confirm the failure happened at notify, not earlier
+        mock_notify.assert_called_once()
+
+        conn = init_db(Path(self._db_path))
+        try:
+            seen = get_processed_ids(conn, {"ibkr:NOTIFY_FAIL"})
+            self.assertEqual(seen, set())
+        finally:
+            conn.close()
 
 
 # ── _send_no_mark tests ─────────────────────────────────────────────
@@ -548,6 +650,59 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(called)
 
+    @patch(
+        "relay_core.listener_engine._send_and_mark",
+        side_effect=RuntimeError("boom"),
+    )
+    async def test_send_and_mark_failure_is_swallowed(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """Exceptions from _send_and_mark must be caught — never break the event loop."""
+        fill = _make_fill()
+
+        async def on_msg(
+            data: dict[str, Any],
+        ) -> list[OnMessageResult]:
+            return [OnMessageResult(fill=fill, mark=True)]
+
+        config = ListenerConfig(
+            connect=_dummy_connect,
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        _set_listener(config)
+        # Must not propagate
+        await _handle_event(
+            "ibkr", {"type": "x"},
+            debounce_buf=None, db_path="/tmp/test.db",
+        )
+        mock_send.assert_called_once()
+
+    @patch(
+        "relay_core.listener_engine._send_no_mark",
+        side_effect=RuntimeError("boom"),
+    )
+    async def test_send_no_mark_failure_is_swallowed(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """Exceptions from _send_no_mark must be caught — never break the event loop."""
+        fill = _make_fill()
+
+        async def on_msg(
+            data: dict[str, Any],
+        ) -> list[OnMessageResult]:
+            return [OnMessageResult(fill=fill, mark=False)]
+
+        config = ListenerConfig(
+            connect=_dummy_connect,
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        _set_listener(config)
+        await _handle_event(
+            "ibkr", {"type": "x"},
+            debounce_buf=None, db_path="/tmp/test.db",
+        )
+        mock_send.assert_called_once()
+
 
 # ── DebounceBuffer tests ────────────────────────────────────────────
 
@@ -645,3 +800,87 @@ class TestDebounceBuffer(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(buf._buffer), 1)
         self.assertEqual(buf._buffer[0].execId, "CAN1")
+
+    @patch("relay_core.listener_engine._send_and_mark")
+    async def test_timer_resets_on_subsequent_add(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """Adding a new fill before the debounce window expires resets the timer.
+
+        With debounce_ms=200: add fill1 → wait 0.12s (no flush) → add fill2 →
+        wait 0.12s (no flush yet, timer was reset) → wait 0.12s more (now expired).
+        Both fills should be dispatched in a single batch.
+        """
+        buf = DebounceBuffer(
+            relay_name="ibkr", debounce_ms=200,
+            db_path="/tmp/test.db",
+        )
+        fill1 = _make_fill(exec_id="A1")
+        fill2 = _make_fill(exec_id="A2")
+
+        await buf.add(fill1)
+        await asyncio.sleep(0.12)
+        mock_send.assert_not_called()  # Original window not yet up
+
+        await buf.add(fill2)             # This must reset the timer
+        await asyncio.sleep(0.12)
+        mock_send.assert_not_called()    # Half of the *new* window — still buffered
+
+        await asyncio.sleep(0.15)        # Past the new window
+        mock_send.assert_called_once()
+        fills_dispatched = mock_send.call_args[0][1]
+        self.assertEqual(len(fills_dispatched), 2)
+        self.assertEqual(
+            [f.execId for f in fills_dispatched], ["A1", "A2"],
+        )
+
+    async def test_add_during_flush_preserves_new_fill(self) -> None:
+        """A fill added while a flush is in progress is preserved for the next flush.
+
+        The in-progress flush has already cleared the buffer and snapshotted
+        its fills, so the newly-added fill must NOT be lost: it should sit in
+        the buffer waiting for its own debounce cycle.
+        """
+        flush_started = asyncio.Event()
+        flush_can_complete = asyncio.Event()
+
+        async def slow_to_thread(*args: Any, **kwargs: Any) -> None:
+            flush_started.set()
+            await flush_can_complete.wait()
+
+        buf = DebounceBuffer(
+            relay_name="ibkr", debounce_ms=5000,
+            db_path="/tmp/test.db",
+        )
+        first = _make_fill(exec_id="FIRST")
+        second = _make_fill(exec_id="SECOND")
+        await buf.add(first)
+
+        with patch("asyncio.to_thread", side_effect=slow_to_thread):
+            flush_task = asyncio.create_task(buf.flush())
+            await flush_started.wait()
+
+            # Buffer has been snapshotted and cleared; flush is in-flight
+            self.assertEqual(len(buf._buffer), 0)
+            self.assertTrue(buf._flushing)
+
+            # Add a new fill while the flush is mid-flight
+            await buf.add(second)
+            self.assertEqual(len(buf._buffer), 1)
+            self.assertEqual(buf._buffer[0].execId, "SECOND")
+
+            flush_can_complete.set()
+            await flush_task
+
+        # FIRST was dispatched; SECOND remains buffered for its own cycle
+        self.assertEqual(len(buf._buffer), 1)
+        self.assertEqual(buf._buffer[0].execId, "SECOND")
+        self.assertFalse(buf._flushing)
+
+        # Cleanup the pending _delayed_flush task scheduled by the second add()
+        if buf._flush_task is not None and not buf._flush_task.done():
+            buf._flush_task.cancel()
+            try:
+                await buf._flush_task
+            except (asyncio.CancelledError, Exception):
+                pass
