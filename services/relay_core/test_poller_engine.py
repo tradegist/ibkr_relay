@@ -9,6 +9,7 @@ import pytest
 from relay_core.context import get_relay
 from relay_core.dedup import get_processed_ids, mark_processed_batch
 from relay_core.poller_engine import (
+    PollerConfig,
     _meta_key,
     _prefix_ids,
     _strip_prefix,
@@ -104,18 +105,17 @@ def _set_poller(cfg: Any) -> None:
 
 # ── Mock PollerConfig ────────────────────────────────────────────────
 
-class _MockPollerConfig:
-    """Minimal PollerConfig-like object for tests."""
-
-    def __init__(
-        self,
-        fetch: Any = None,
-        parse: Any = None,
-        interval: int = 600,
-    ) -> None:
-        self.fetch = fetch or _noop_fetch
-        self.parse = parse or _noop_parse
-        self.interval = interval
+def _MockPollerConfig(
+    fetch: Any = None,
+    parse: Any = None,
+    interval: int = 600,
+) -> PollerConfig:
+    """Build a PollerConfig with test defaults."""
+    return PollerConfig(
+        fetch=fetch or _noop_fetch,
+        parse=parse or _noop_parse,
+        interval=interval,
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════
