@@ -1,7 +1,6 @@
 """Tests for the generic WS listener engine."""
 
 import asyncio
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -197,11 +196,11 @@ class TestSendAndMarkRealDb(unittest.TestCase):
     """Exercise the full dedup pipeline against a real SQLite DB."""
 
     def setUp(self) -> None:
-        self._tmp_dir = tempfile.mkdtemp()
-        self._db_path = str(Path(self._tmp_dir) / "test.db")
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._db_path = str(Path(self._tmp_dir.name) / "test.db")
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp_dir, ignore_errors=True)
+        self._tmp_dir.cleanup()
 
     @patch("relay_core.listener_engine.notify")
     def test_new_fill_persisted_in_real_db(self, mock_notify: MagicMock) -> None:
@@ -805,31 +804,40 @@ class TestDebounceBuffer(unittest.IsolatedAsyncioTestCase):
     async def test_timer_resets_on_subsequent_add(
         self, mock_send: MagicMock,
     ) -> None:
-        """Adding a new fill before the debounce window expires resets the timer.
-
-        With debounce_ms=200: add fill1 → wait 0.12s (no flush) → add fill2 →
-        wait 0.12s (no flush yet, timer was reset) → wait 0.12s more (now expired).
-        Both fills should be dispatched in a single batch.
+        """Adding a fill before the debounce window expires cancels the pending
+        flush task and starts a new one — verified via task identity so the
+        assertion does not depend on wall-clock sleep precision.
         """
         buf = DebounceBuffer(
-            relay_name="ibkr", debounce_ms=200,
+            relay_name="ibkr", debounce_ms=10_000,
             db_path="/tmp/test.db",
         )
         fill1 = _make_fill(exec_id="A1")
         fill2 = _make_fill(exec_id="A2")
 
         await buf.add(fill1)
-        await asyncio.sleep(0.12)
-        mock_send.assert_not_called()  # Original window not yet up
+        first_task = buf._flush_task
+        assert first_task is not None
 
-        await buf.add(fill2)             # This must reset the timer
-        await asyncio.sleep(0.12)
-        mock_send.assert_not_called()    # Half of the *new* window — still buffered
+        await buf.add(fill2)
+        second_task = buf._flush_task
+        assert second_task is not None
 
-        await asyncio.sleep(0.15)        # Past the new window
+        # The second add must have replaced and cancelled the first task.
+        self.assertIsNot(first_task, second_task)
+        with self.assertRaises(asyncio.CancelledError):
+            await first_task
+        mock_send.assert_not_called()
+
+        # Cancel the still-sleeping second task, then flush manually to verify
+        # both buffered fills dispatch in a single batch.
+        second_task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await second_task
+
+        await buf.flush()
         mock_send.assert_called_once()
         fills_dispatched = mock_send.call_args[0][1]
-        self.assertEqual(len(fills_dispatched), 2)
         self.assertEqual(
             [f.execId for f in fills_dispatched], ["A1", "A2"],
         )
