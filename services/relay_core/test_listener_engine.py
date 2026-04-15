@@ -1,6 +1,7 @@
 """Tests for the generic WS listener engine."""
 
 import asyncio
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -888,7 +889,5 @@ class TestDebounceBuffer(unittest.IsolatedAsyncioTestCase):
         # Cleanup the pending _delayed_flush task scheduled by the second add()
         if buf._flush_task is not None and not buf._flush_task.done():
             buf._flush_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await buf._flush_task
-            except (asyncio.CancelledError, Exception):
-                pass
