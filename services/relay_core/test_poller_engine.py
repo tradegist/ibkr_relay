@@ -9,6 +9,7 @@ import pytest
 from relay_core.context import get_relay
 from relay_core.dedup import get_processed_ids, mark_processed_batch
 from relay_core.poller_engine import (
+    PollerConfig,
     _meta_key,
     _prefix_ids,
     _strip_prefix,
@@ -104,18 +105,17 @@ def _set_poller(cfg: Any) -> None:
 
 # ── Mock PollerConfig ────────────────────────────────────────────────
 
-class _MockPollerConfig:
-    """Minimal PollerConfig-like object for tests."""
-
-    def __init__(
-        self,
-        fetch: Any = None,
-        parse: Any = None,
-        interval: int = 600,
-    ) -> None:
-        self.fetch = fetch or _noop_fetch
-        self.parse = parse or _noop_parse
-        self.interval = interval
+def _MockPollerConfig(
+    fetch: Any = None,
+    parse: Any = None,
+    interval: int = 600,
+) -> PollerConfig:
+    """Build a PollerConfig with test defaults."""
+    return PollerConfig(
+        fetch=fetch or _noop_fetch,
+        parse=parse or _noop_parse,
+        interval=interval,
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -396,3 +396,126 @@ class TestPollOnce:
         mock_notify.assert_called_once()
         sent_payload = mock_notify.call_args[0][1]
         assert len(sent_payload.data) == 2
+
+    # ── Watermark boundary and combined filtering ─────────────────────
+
+    @patch("relay_core.poller_engine.notify")
+    def test_watermark_boundary_includes_equal_timestamp(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        """Fill with timestamp == watermark passes the >= filter and is processed."""
+        set_last_poll_ts(meta_db, "20250403;120000", "ibkr")
+        fill = _make_fill(execId="BOUNDARY", timestamp="20250403;120000")
+        cfg = _MockPollerConfig(parse=lambda _: ([fill], []))
+        _set_poller(cfg)
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+        assert len(result) == 1
+        assert "ibkr:BOUNDARY" in get_processed_ids(dedup_db, {"ibkr:BOUNDARY"})
+
+    @patch("relay_core.poller_engine.notify")
+    def test_old_fill_blocked_by_watermark_never_reaches_dedup(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        """Fills older than the watermark are dropped before the dedup lookup.
+
+        This verifies the watermark is acting as an optimization: an old fill
+        that was never processed should still be absent from the dedup DB after
+        being filtered out, confirming it never reached that layer.
+        """
+        set_last_poll_ts(meta_db, "20250403;120000", "ibkr")
+        old_fill = _make_fill(execId="OLD_UNSEEN", timestamp="20250403;110000")
+        cfg = _MockPollerConfig(parse=lambda _: ([old_fill], []))
+        _set_poller(cfg)
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+        assert result == []
+        mock_notify.assert_not_called()
+        assert "ibkr:OLD_UNSEEN" not in get_processed_ids(dedup_db, {"ibkr:OLD_UNSEEN"})
+
+    @patch("relay_core.poller_engine.notify")
+    def test_fill_passes_watermark_but_already_in_dedup(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        """Fill that passes the watermark but is already in dedup is not reprocessed.
+
+        This is the primary real-world duplicate scenario: the fill was processed
+        in a previous cycle, its timestamp equals the watermark (the common case
+        because watermark is set to max_ts of the last processed batch).
+        """
+        set_last_poll_ts(meta_db, "20250403;120000", "ibkr")
+        mark_processed_batch(dedup_db, ["ibkr:TX1"])
+
+        fill = _make_fill(execId="TX1", timestamp="20250403;120000")
+        cfg = _MockPollerConfig(parse=lambda _: ([fill], []))
+        _set_poller(cfg)
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+        assert result == []
+        mock_notify.assert_not_called()
+
+    @patch("relay_core.poller_engine.notify")
+    def test_watermark_advances_to_max_of_new_fills_not_deduped(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        """Watermark is max of genuinely new fills, not of dedup-blocked candidates.
+
+        When a candidate with a higher timestamp is blocked by dedup, the watermark
+        must not advance past the highest timestamp that was actually processed.
+        """
+        set_last_poll_ts(meta_db, "20250403;120000", "ibkr")
+        mark_processed_batch(dedup_db, ["ibkr:ALREADY_SEEN"])
+
+        already_seen = _make_fill(execId="ALREADY_SEEN", timestamp="20250403;150000")
+        new_fill = _make_fill(execId="NEW", timestamp="20250403;130000")
+        cfg = _MockPollerConfig(parse=lambda _: ([already_seen, new_fill], []))
+        _set_poller(cfg)
+        poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+
+        # Watermark reflects max of new fills only, not the dedup-blocked one
+        assert get_last_poll_ts(meta_db, "ibkr") == "20250403;130000"
+
+    @patch("relay_core.poller_engine.notify")
+    def test_all_fills_filtered_by_watermark_no_webhook_no_dedup_write(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        """When all fills are older than the watermark: no webhook, watermark unchanged, nothing written to dedup."""
+        set_last_poll_ts(meta_db, "20250403;150000", "ibkr")
+        old1 = _make_fill(execId="OLD1", timestamp="20250403;100000")
+        old2 = _make_fill(execId="OLD2", timestamp="20250403;110000")
+        cfg = _MockPollerConfig(parse=lambda _: ([old1, old2], []))
+        _set_poller(cfg)
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+        assert result == []
+        mock_notify.assert_not_called()
+        assert get_last_poll_ts(meta_db, "ibkr") == "20250403;150000"
+        assert len(get_processed_ids(dedup_db, {"ibkr:OLD1", "ibkr:OLD2"})) == 0
+
+    @patch("relay_core.poller_engine.notify")
+    def test_secondary_poller_index_watermark_independent(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        """poller_index=1 has an independent watermark; processing it does not affect index 0.
+
+        Sets index 0's watermark high enough to block the test fill, then runs
+        a full poll_once() cycle on index 1 (no watermark) and confirms the
+        fill is processed and only the index 1 watermark is updated.
+        """
+        set_last_poll_ts(meta_db, "20250403;120000", "ibkr", poller_index=0)
+
+        fill = _make_fill(execId="TX_IDX1", timestamp="20250403;100000")
+        cfg_idx1 = _MockPollerConfig(parse=lambda _: ([fill], []))
+        relay = get_relay("ibkr")
+        relay.poller_configs = [_MockPollerConfig(), cfg_idx1]
+
+        result = poll_once("ibkr", poller_index=1, dedup_conn=dedup_db, meta_conn=meta_db)
+        assert len(result) == 1
+        mock_notify.assert_called_once()
+
+        # Index 0 watermark untouched
+        assert get_last_poll_ts(meta_db, "ibkr", poller_index=0) == "20250403;120000"
+        # Index 1 watermark now reflects what it processed
+        assert get_last_poll_ts(meta_db, "ibkr", poller_index=1) == "20250403;100000"

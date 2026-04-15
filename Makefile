@@ -8,6 +8,10 @@ E2E_COMPOSE_DOWN = SITE_DOMAIN=unused API_TOKEN=test-token docker compose -f doc
 LOCAL_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.local.yml
 CLI_RELAY_ENV = $(if $(ENV),RELAY_ENV=$(ENV))
 
+define auto_debug_replicas
+if [ -f .env ]; then . ./.env; if [ -n "$$(printf '%s' "$${DEBUG_WEBHOOK_PATH:-}" | tr -d '[:space:]')" ]; then export DEBUG_REPLICAS=$${DEBUG_REPLICAS:-1}; fi; fi
+endef
+
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
 
@@ -49,7 +53,8 @@ sync: ## Push .env + restart (S=service B=1 LOCAL_FILES=1 SKIP_E2E=1 ENV=local)
 	env="$${RELAY_ENV:-$${DEFAULT_CLI_RELAY_ENV:-prod}}"; \
 	[ -n "$(ENV)" ] && env="$(ENV)"; \
 	if [ "$$env" = "local" ]; then \
-		$(LOCAL_COMPOSE) up -d; \
+		$(auto_debug_replicas); \
+		$(LOCAL_COMPOSE) up -d --force-recreate $(if $(B),--build); \
 	else \
 		$(PYTHON) -m cli sync $(S) $(if $(LOCAL_FILES),--local-files) $(if $(B),--build) $(if $(SKIP_E2E),--skip-e2e); \
 	fi
@@ -89,14 +94,7 @@ lint: ## Run ruff linter (use FIX=1 to auto-fix)
 	@if grep -rn '__all__' services/ types/ cli/ --include='*.py'; then echo "ERROR: __all__ is banned — use explicit re-exports"; exit 1; fi
 
 local-up: ## Start full stack locally (no TLS, direct port access)
-	@if [ -f .env ]; then \
-		. ./.env; \
-		debug_webhook_path="$${DEBUG_WEBHOOK_PATH:-}"; \
-		if [ -n "$$(printf '%s' "$$debug_webhook_path" | tr -d '[:space:]')" ]; then \
-			export DEBUG_REPLICAS=$${DEBUG_REPLICAS:-1}; \
-		fi; \
-	fi && \
-	$(LOCAL_COMPOSE) up -d --build
+	@$(auto_debug_replicas) && $(LOCAL_COMPOSE) up -d --build
 	@echo ""
 	@echo "  Relays:   http://localhost:15001/health"
 	@if [ -f .env ]; then . ./.env; fi; \
