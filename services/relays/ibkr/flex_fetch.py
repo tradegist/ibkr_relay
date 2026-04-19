@@ -1,13 +1,9 @@
 """IBKR Flex Web Service — two-step report fetcher."""
 
-import argparse
 import logging
-import os
 import re
-import sys
 import time
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 import httpx
 
@@ -23,7 +19,7 @@ def _redact_token(text: str) -> str:
     return _FLEX_TOKEN_RE.sub(r"\1t=REDACTED", text)
 
 
-class _RedactTokenFilter(logging.Filter):
+class RedactTokenFilter(logging.Filter):
     """Strip Flex tokens from any log record that passes through."""
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -111,51 +107,3 @@ def fetch_flex_report(flex_token: str, flex_query_id: str) -> str | None:
         return None
 
 
-# ── CLI: dump a live Flex response for debugging / fixture capture ──────
-
-def _main() -> None:
-    """Fetch a Flex report using env-var credentials and write it to disk.
-
-    Usage:  python -m relays.ibkr.flex_fetch --dump /tmp/raw.xml [--suffix _2]
-
-    Reads ``IBKR_FLEX_TOKEN[suffix]`` and ``IBKR_FLEX_QUERY_ID[suffix]``
-    from the environment.  Writes the raw XML response to ``--dump`` (or
-    stdout when ``--dump`` is ``-`` / omitted).
-    """
-    parser = argparse.ArgumentParser(
-        description="Dump an IBKR Flex report (Activity or Trade Confirmation) to disk.",
-    )
-    parser.add_argument(
-        "--dump", metavar="PATH", default="-",
-        help="Output path; '-' or omitted writes to stdout.",
-    )
-    parser.add_argument(
-        "--suffix", default="",
-        help="Env-var suffix, e.g. '_2' to read IBKR_FLEX_TOKEN_2 / IBKR_FLEX_QUERY_ID_2.",
-    )
-    args = parser.parse_args()
-
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    logging.getLogger().addFilter(_RedactTokenFilter())
-
-    token = os.environ.get(f"IBKR_FLEX_TOKEN{args.suffix}", "").strip()
-    query_id = os.environ.get(f"IBKR_FLEX_QUERY_ID{args.suffix}", "").strip()
-    if not token:
-        sys.exit(f"IBKR_FLEX_TOKEN{args.suffix} is not set")
-    if not query_id:
-        sys.exit(f"IBKR_FLEX_QUERY_ID{args.suffix} is not set")
-
-    xml = fetch_flex_report(flex_token=token, flex_query_id=query_id)
-    if xml is None:
-        sys.exit("Flex fetch failed — see log output above")
-
-    if args.dump == "-":
-        sys.stdout.write(xml)
-    else:
-        path = Path(args.dump)
-        path.write_text(xml)
-        log.info("Wrote %d bytes to %s", len(xml), path)
-
-
-if __name__ == "__main__":
-    _main()

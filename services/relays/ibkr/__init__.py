@@ -27,7 +27,7 @@ from relay_core import (
 from shared import BuySell, Fill, Source
 
 from .bridge_models import WsEnvelope
-from .flex_fetch import _RedactTokenFilter, fetch_flex_report
+from .flex_fetch import RedactTokenFilter, fetch_flex_report
 from .flex_parser import parse_fills
 from .utilities import normalize_asset_class
 
@@ -306,7 +306,7 @@ def _build_listener_config() -> ListenerConfig | None:
 
 
 def _on_start(ctx: StartupContext) -> None:
-    ctx.add_logging_filter(_RedactTokenFilter())
+    ctx.add_logging_filter(RedactTokenFilter())
 
 
 # ── Public API ───────────────────────────────────────────────────────

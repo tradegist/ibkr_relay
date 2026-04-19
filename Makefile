@@ -73,13 +73,22 @@ test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2]
 	$(CLI_RELAY_ENV) $(PYTHON) -m cli test-webhook $(S)
 
 ibkr-flex-dump: ## Dump a live IBKR Flex XML response (make ibkr-flex-dump [F=/tmp/raw.xml] [S=_2])
-	@set -a; . ./.env.relays; set +a; \
-	$(PYTHON) -m relays.ibkr.flex_fetch --dump $${F:--} $(if $(S),--suffix $(S),)
+	@test -f .env.relays || { echo "ERROR: .env.relays not found — create it from env_examples/env.relays"; exit 1; }; \
+	set -a; . ./.env.relays; set +a; \
+	suffix="$(S)"; \
+	$(PYTHON) -m relays.ibkr.flex_dump \
+		--token "$$(eval echo \$${IBKR_FLEX_TOKEN$$suffix})" \
+		--query-id "$$(eval echo \$${IBKR_FLEX_QUERY_ID$$suffix})" \
+		$(if $(F),--dump $(F))
 
 ibkr-flex-refresh: ## Refresh IBKR Flex fixture (fetch + auto-detect AF/TC + sanitize) [S=_2]
 	@raw=services/relays/ibkr/fixtures/raw.xml; \
+	test -f .env.relays || { echo "ERROR: .env.relays not found — create it from env_examples/env.relays"; exit 1; }; \
 	set -a; . ./.env.relays; set +a; \
-	$(PYTHON) -m relays.ibkr.flex_fetch --dump $$raw $(if $(S),--suffix $(S),) && \
+	suffix="$(S)"; \
+	$(PYTHON) -m relays.ibkr.flex_dump \
+		--token "$$(eval echo \$${IBKR_FLEX_TOKEN$$suffix})" \
+		--query-id "$$(eval echo \$${IBKR_FLEX_QUERY_ID$$suffix})" && \
 	if grep -q '<TradeConfirm' $$raw; then \
 		out=services/relays/ibkr/fixtures/trade_confirm_sample.xml; kind="Trade Confirmation"; \
 	else \
