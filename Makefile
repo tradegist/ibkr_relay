@@ -97,7 +97,7 @@ ibkr-flex-refresh: ## Refresh IBKR Flex fixture (fetch + auto-detect AF/TC + san
 	$(PYTHON) services/relays/ibkr/fixtures/sanitize.py $$raw $$out && rm -f $$raw && \
 	echo "Detected $$kind response -> $$out"
 
-types: typecheck ## Regenerate TypeScript + Python types from Pydantic models
+types: ## Regenerate TypeScript + Python types from Pydantic models
 	PYTHONPATH=services $(PYTHON) schema_gen.py shared > types/typescript/shared/types.schema.json
 	npx --yes json-schema-to-typescript types/typescript/shared/types.schema.json > types/typescript/shared/types.d.ts
 	PYTHONPATH=services $(PYTHON) schema_gen.py relay_core.relay_models > types/typescript/relay_api/types.schema.json
@@ -105,7 +105,7 @@ types: typecheck ## Regenerate TypeScript + Python types from Pydantic models
 	@echo "Generated types/typescript/shared/types.d.ts + types/typescript/relay_api/types.d.ts"
 	$(PYTHON) gen_python_types.py
 	$(PYTHON) -m ruff check types/python/b_relay_types/ --fix --quiet
-	$(PYTHON) -m mypy types/python/b_relay_types/
+	$(MAKE) typecheck
 
 test: ## Run unit tests
 	PYTHONPATH=.:services:services/relay_core:services/debug $(PYTHON) -m pytest -v
@@ -118,6 +118,7 @@ typecheck: ## Run mypy strict type checking
 	MYPYPATH=services/debug $(PYTHON) -m mypy services/debug/
 	$(PYTHON) -m mypy schema_gen.py
 	$(PYTHON) -m mypy gen_python_types.py
+	$(PYTHON) -m mypy types/python/b_relay_types/
 
 lint: ## Run ruff linter (use FIX=1 to auto-fix)
 	$(PYTHON) -m ruff check services/shared/ services/relay_core/ services/relays/ services/debug/ cli/ schema_gen.py gen_python_types.py types/python/b_relay_types/ $(if $(FIX),--fix)
