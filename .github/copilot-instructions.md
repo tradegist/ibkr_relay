@@ -1,8 +1,8 @@
-# Broker Relay — Project Guidelines
+# BrokeRelay — Project Guidelines
 
 ## Purpose
 
-Broker Relay is a **relay between broker accounts** that provides clear, common interfaces to communicate with different brokers through a single interface layer.
+BrokeRelay is a **relay between broker accounts** that provides clear, common interfaces to communicate with different brokers through a single interface layer.
 
 - **Currently supports:** IBKR (Interactive Brokers) and Kraken (crypto exchange), with more brokers planned via the relay adapter pattern
 - **Currently provides:** Webhook push notifications (more notification layers planned)

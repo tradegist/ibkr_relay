@@ -1,4 +1,4 @@
-# BrokeRRelay
+# BrokeRelay
 
 A **relay between broker accounts** that provides clear, common interfaces to communicate with different brokers through a single interface layer — deployed to a DigitalOcean droplet with a single `make deploy`.
 
@@ -9,7 +9,7 @@ A **relay between broker accounts** that provides clear, common interfaces to co
 
 Broker APIs are fragmented — each has its own data formats, auth patterns, and delivery mechanisms. Every integration rebuilds the same plumbing: polling, parsing, dedup, webhook delivery.
 
-Broker Relay abstracts this with a **relay adapter pattern**: one generic engine handles polling, dedup, aggregation, and webhook delivery; broker-specific adapters handle the API quirks. Adding a broker is writing one adapter.
+BrokeRelay abstracts this with a **relay adapter pattern**: one generic engine handles polling, dedup, aggregation, and webhook delivery; broker-specific adapters handle the API quirks. Adding a broker is writing one adapter.
 
 Currently supports **IBKR** (Interactive Brokers) via the Flex Web Service and **Kraken** (crypto exchange) via REST + WebSocket v2. Deploys to a DigitalOcean droplet from **$4/month**, with:
 

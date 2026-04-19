@@ -1,4 +1,4 @@
-"""broker-relay-types — Pydantic models for Broker Relay.
+"""broker-relay-types — Pydantic models for BrokeRelay.
 
 Two modules:
   - shared: CommonFill models (Fill, Trade, WebhookPayload, etc.)

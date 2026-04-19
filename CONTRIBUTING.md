@@ -1,4 +1,4 @@
-# Contributing to BrokeRRelay
+# Contributing to BrokeRelay
 
 Developer and contributor reference — setup, testing, project structure, type regeneration, and broker-adapter internals.
 
@@ -20,28 +20,28 @@ For deployment and user-facing documentation, see the [README](README.md).
 All operations are available via `make` or the Python CLI directly. Run `make help` to see the full list:
 
 ```
-  make deploy      Deploy infrastructure (Terraform + Docker)
-  make destroy     Permanently destroy all infrastructure
-  make pause       Snapshot droplet + delete (save costs)
-  make resume      Restore droplet from snapshot
-  make setup       Create .venv and install all dependencies
-  make sync        Push .env + .env.relays + restart (S=service B=1 LOCAL_FILES=1 ENV=local)
-  make poll        Trigger an immediate poll (RELAY=ibkr IDX=1 V=1 REPLAY=N)
-  make test-webhook Send sample trades to webhook endpoint
-  make types       Regenerate TypeScript + Python types from Pydantic models
-  make test        Run unit tests (pytest)
-  make typecheck   Run mypy strict type checking
-  make lint        Run ruff linter (FIX=1 to auto-fix)
-  make e2e         Run E2E tests (starts/stops stack automatically)
-  make e2e-up      Start E2E test stack (relays + debug)
-  make e2e-run     Run E2E tests (stack must be up)
-  make e2e-down    Stop and remove E2E test stack
-  make local-up    Start full stack locally (no TLS, direct port access)
-  make local-down  Stop local stack
-  make logs        Stream logs (S=service ENV=local, default: relays on droplet)
-  make stats       Show container resource usage
-  make ssh         SSH into the droplet
-  make help        Show available commands
+  make deploy            Deploy infrastructure (Terraform + Docker)
+  make destroy           Permanently destroy all infrastructure
+  make pause             Snapshot droplet + delete (save costs)
+  make resume            Restore droplet from snapshot
+  make setup             Create .venv and install all dependencies
+  make sync              Push .env + .env.relays + restart (S=service B=1 LOCAL_FILES=1 ENV=local)
+  make poll              Trigger an immediate poll (RELAY=ibkr IDX=1 V=1 REPLAY=N)
+  make test-webhook      Send sample trades to webhook endpoint
+  make types             Regenerate TypeScript + Python types from Pydantic models
+  make test              Run unit tests (pytest)
+  make typecheck         Run mypy strict type checking
+  make lint              Run ruff linter (FIX=1 to auto-fix)
+  make e2e               Run E2E tests (starts/stops stack automatically)
+  make e2e-up            Start E2E test stack (relays + debug)
+  make e2e-run           Run E2E tests (stack must be up)
+  make e2e-down          Stop and remove E2E test stack
+  make local-up          Start full stack locally (no TLS, direct port access)
+  make local-down        Stop local stack
+  make logs              Stream logs (S=service ENV=local, default: relays on droplet)
+  make stats             Show container resource usage
+  make ssh               SSH into the droplet
+  make help              Show available commands
 ```
 
 Every target above maps 1:1 to `python3 -m cli <command>` — useful on Windows where `make` isn't available.
