@@ -1,4 +1,4 @@
-.PHONY: deps setup deploy destroy pause resume sync poll test-webhook types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats ssh help
+.PHONY: deps setup deploy destroy pause resume sync poll test-webhook ibkr-flex-dump ibkr-flex-refresh types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats ssh help
 
 PROJECT = broker-relay
 PYTHON ?= .venv/bin/python3
@@ -22,6 +22,10 @@ deps: ## Install Python dependencies
 	$(PIP) install $(REQ_FILES)
 
 setup: ## Create .venv and install all dependencies
+	@if [ -d .venv ] && ! $(PYTHON) -c "import pip" >/dev/null 2>&1; then \
+		echo "  Existing .venv is broken (shebangs point at a missing interpreter) — rebuilding"; \
+		rm -rf .venv; \
+	fi
 	@test -d .venv || python3 -m venv .venv
 	$(MAKE) deps PIP=.venv/bin/pip
 	@echo "$(CURDIR)/services/debug" > $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
@@ -67,6 +71,31 @@ poll: ## Trigger an immediate poll (RELAY=ibkr, IDX=1, V=1 verbose, REPLAY=N res
 
 test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2] [ENV=local])
 	$(CLI_RELAY_ENV) $(PYTHON) -m cli test-webhook $(S)
+
+ibkr-flex-dump: ## Dump a live IBKR Flex XML response (make ibkr-flex-dump [F=/tmp/raw.xml] [S=_2])
+	@test -f .env.relays || { echo "ERROR: .env.relays not found — create it from env_examples/env.relays"; exit 1; }; \
+	set -a; . ./.env.relays; set +a; \
+	suffix="$(S)"; \
+	$(PYTHON) -m relays.ibkr.flex_dump \
+		--token "$$(printenv "IBKR_FLEX_TOKEN$$suffix")" \
+		--query-id "$$(printenv "IBKR_FLEX_QUERY_ID$$suffix")" \
+		$(if $(F),--dump $(F))
+
+ibkr-flex-refresh: ## Refresh IBKR Flex fixture (fetch + auto-detect AF/TC + sanitize) [S=_2]
+	@raw=services/relays/ibkr/fixtures/raw.xml; \
+	test -f .env.relays || { echo "ERROR: .env.relays not found — create it from env_examples/env.relays"; exit 1; }; \
+	set -a; . ./.env.relays; set +a; \
+	suffix="$(S)"; \
+	$(PYTHON) -m relays.ibkr.flex_dump \
+		--token "$$(printenv "IBKR_FLEX_TOKEN$$suffix")" \
+		--query-id "$$(printenv "IBKR_FLEX_QUERY_ID$$suffix")" && \
+	if grep -q '<TradeConfirm' $$raw; then \
+		out=services/relays/ibkr/fixtures/trade_confirm_sample.xml; kind="Trade Confirmation"; \
+	else \
+		out=services/relays/ibkr/fixtures/activity_flex_sample.xml; kind="Activity Flex"; \
+	fi; \
+	$(PYTHON) services/relays/ibkr/fixtures/sanitize.py $$raw $$out && rm -f $$raw && \
+	echo "Detected $$kind response -> $$out"
 
 types: typecheck ## Regenerate TypeScript + Python types from Pydantic models
 	PYTHONPATH=services $(PYTHON) schema_gen.py shared > types/typescript/shared/types.schema.json

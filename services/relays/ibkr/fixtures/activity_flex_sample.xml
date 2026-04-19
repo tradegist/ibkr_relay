@@ -1,0 +1,9 @@
+<FlexQueryResponse queryName="TradeLast30Days" type="AF">
+<FlexStatements count="1">
+<FlexStatement accountId="UXXXXXXX" fromDate="20260319" toDate="20260417" period="Last30CalendarDays" whenGenerated="20260419;081448">
+<Trades>
+<Trade accountId="UXXXXXXX" currency="USD" fxRateToBase="0.85041" assetCategory="STK" symbol="TSLA" listingExchange="NASDAQ" tradeID="1111111111" multiplier="1" strike="" expiry="" dateTime="20260413;093014" putCall="" transactionType="ExchTrade" exchange="BATS" quantity="2" tradePrice="349.95" taxes="0" ibCommission="-1" ibCommissionCurrency="USD" cost="566.06386" fifoPnlRealized="-134.83614" buySell="BUY" ibOrderID="333333331" transactionID="22222222221" orderTime="20260411;012301" acctAlias="" model="" subCategory="COMMON" description="TESLA INC" conid="76792991" securityID="US88160R1014" securityIDType="ISIN" cusip="88160R101" isin="US88160R1014" figi="BBG000N9MNX3" underlyingConid="" underlyingSymbol="TSLA" underlyingSecurityID="" underlyingListingExchange="" issuer="" issuerCountryCode="US" relatedTradeID="" reportDate="20260413" tradeDate="20260413" principalAdjustFactor="" settleDateTarget="20260414" tradeMoney="699.9" proceeds="-699.9" netCash="-700.9" closePrice="352.42" openCloseIndicator="C" notes="" mtmPnl="4.94" origTradePrice="0" origTradeDate="" origTradeID="" origOrderID="0" origTransactionID="0" clearingFirmID="" ibExecID="00018d97.00000001.01.01" relatedTransactionID="" rtn="" brokerageOrderID="002e.00018d91.01.01" orderReference="" volatilityOrderLink="" exchOrderId="002e.0001.00001" extExecID="AAAAA1" openDateTime="" holdingPeriodDateTime="" whenRealized="" whenReopened="" levelOfDetail="EXECUTION" changeInPrice="0" changeInQuantity="0" orderType="MKT" traderID="" isAPIOrder="Y" accruedInt="0" initialInvestment="" positionActionID="" serialNumber="" deliveryType="" commodityType="" fineness="0.0" weight="0.0" />
+</Trades>
+</FlexStatement>
+</FlexStatements>
+</FlexQueryResponse>

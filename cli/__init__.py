@@ -1,4 +1,4 @@
-"""Broker Relay CLI — project-specific configuration.
+"""BrokeRelay CLI — project-specific configuration.
 
 Sets up CoreConfig and exposes project-specific helpers used by
 project-specific commands (poll, test_webhook).
@@ -92,7 +92,7 @@ def relay_api(path, method="POST", data=None):
             die(f"Request failed ({e.code}): {content}")
 
 
-# ── CoreConfig for Broker Relay project ──────────────────────────────
+# ── CoreConfig for BrokeRelay project ──────────────────────────────
 
 _CONFIG = CoreConfig(
     project_name=PROJECT_NAME,

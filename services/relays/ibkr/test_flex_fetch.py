@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 
-from .flex_fetch import _RedactTokenFilter, fetch_flex_report
+from .flex_fetch import RedactTokenFilter, fetch_flex_report
 
 # ── XML helpers ─────────────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ class TestRedactTokenFilter(unittest.TestCase):
     """Token filter strips ``t=`` values from log records."""
 
     def setUp(self) -> None:
-        self.filt = _RedactTokenFilter()
+        self.filt = RedactTokenFilter()
 
     def _make_record(self, msg: str, args: tuple[object, ...] = ()) -> logging.LogRecord:
         record = logging.LogRecord(

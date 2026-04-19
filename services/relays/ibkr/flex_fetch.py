@@ -19,7 +19,7 @@ def _redact_token(text: str) -> str:
     return _FLEX_TOKEN_RE.sub(r"\1t=REDACTED", text)
 
 
-class _RedactTokenFilter(logging.Filter):
+class RedactTokenFilter(logging.Filter):
     """Strip Flex tokens from any log record that passes through."""
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -105,3 +105,5 @@ def fetch_flex_report(flex_token: str, flex_query_id: str) -> str | None:
     except (httpx.HTTPError, ET.ParseError) as exc:
         log.error("Flex report fetch failed: %s", _redact_token(str(exc)))
         return None
+
+

@@ -1,9 +1,13 @@
 """Comprehensive tests for IBKR Flex XML parser."""
 
+from pathlib import Path
+
 import pytest
 
 from relays.ibkr.flex_parser import parse_fills
 from shared import BuySell, Fill, Trade, aggregate_fills
+
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -853,3 +857,54 @@ class TestFullPipeline:
         trades = aggregate_fills(fills)
         assert len(trades) == 1
         assert trades[0].volume == 0.0
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#  Live-fixture smoke test (schema drift alarm)
+# ═════════════════════════════════════════════════════════════════════════
+
+class TestLiveFixtures:
+    """Parse sanitized real Flex responses.
+
+    These fixtures are captured from live IBKR Flex queries and sanitized
+    by ``fixtures/sanitize.py``.  They exist to catch schema drift: if
+    IBKR adds or renames attributes in a way that breaks parsing, the
+    next fixture refresh fails these tests instead of silently shipping
+    a regression.
+    """
+
+    def test_activity_flex_sample_parses_cleanly(self) -> None:
+        xml = (_FIXTURES_DIR / "activity_flex_sample.xml").read_text()
+        fills, errors = parse_fills(xml)
+
+        assert errors == []
+        assert len(fills) == 1
+
+        fill = fills[0]
+        assert fill.symbol == "TSLA"
+        assert fill.assetClass == "equity"
+        assert fill.side == BuySell.BUY
+        assert fill.volume == 2.0
+        assert fill.source == "flex"
+        # execId flows from the sanitized ibExecID constant
+        assert fill.execId == "00018d97.00000001.01.01"
+
+    def test_trade_confirm_sample_parses_cleanly(self) -> None:
+        xml = (_FIXTURES_DIR / "trade_confirm_sample.xml").read_text()
+        fills, errors = parse_fills(xml)
+
+        assert errors == []
+        assert len(fills) == 2
+
+        by_symbol = {f.symbol: f for f in fills}
+        assert set(by_symbol) == {"AAPL", "GOOG"}
+        for fill in fills:
+            assert fill.assetClass == "equity"
+            assert fill.side == BuySell.BUY
+            assert fill.source == "flex"
+        # execID (TC) is aliased to ibExecId internally.  Per-row counter
+        # in sanitize.py produces unique execIds so dedup doesn't collapse
+        # the two rows.
+        assert by_symbol["AAPL"].execId == "00018d97.00000001.01.01"
+        assert by_symbol["GOOG"].execId == "00018d97.00000002.01.01"
+        assert len({f.execId for f in fills}) == len(fills)

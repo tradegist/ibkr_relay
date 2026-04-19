@@ -1,0 +1,10 @@
+<FlexQueryResponse queryName="TradeConfirmLast30Days" type="TCF">
+<FlexStatements count="1">
+<FlexStatement accountId="UXXXXXXX" fromDate="20250319" toDate="20250417" period="Last30CalendarDays" whenGenerated="20250419;081448">
+<TradeConfirms>
+<TradeConfirm accountId="UXXXXXXX" currency="USD" assetCategory="STK" symbol="AAPL" description="APPLE INC" conid="265598" securityID="US0378331005" securityIDType="ISIN" cusip="037833100" isin="US0378331005" listingExchange="NASDAQ" multiplier="1" tradeID="1111111111" orderID="333333331" execID="00018d97.00000001.01.01" brokerageOrderID="002e.00018d91.01.01" transactionType="ExchTrade" exchange="ISLAND" buySell="BUY" quantity="1" price="254.6" amount="254.6" proceeds="-254.6" netCash="-255.22125" commission="-0.62125" commissionCurrency="USD" tax="0" settleDate="20250407" tradeDate="20250403" dateTime="20250403;153000" reportDate="20250403" openCloseIndicator="O" notes="P" orderTime="20250403;152959" orderType="MKT" isAPIOrder="Y" />
+<TradeConfirm accountId="UXXXXXXX" currency="USD" assetCategory="STK" symbol="GOOG" description="ALPHABET INC-CL C" conid="191220310" securityID="US02079K1079" securityIDType="ISIN" cusip="02079K107" isin="US02079K1079" listingExchange="NASDAQ" multiplier="1" tradeID="1111111112" orderID="333333332" execID="00018d97.00000002.01.01" brokerageOrderID="002e.00018d92.01.01" transactionType="ExchTrade" exchange="ISLAND" buySell="BUY" quantity="15" price="176.214" amount="2643.21" proceeds="-2643.21" netCash="-2647.11625" commission="-3.90625" commissionCurrency="USD" tax="0" settleDate="20250407" tradeDate="20250403" dateTime="20250403;153001" reportDate="20250403" openCloseIndicator="O" notes="P" orderTime="20250403;152959" orderType="MKT" isAPIOrder="Y" />
+</TradeConfirms>
+</FlexStatement>
+</FlexStatements>
+</FlexQueryResponse>
