@@ -22,6 +22,10 @@ deps: ## Install Python dependencies
 	$(PIP) install $(REQ_FILES)
 
 setup: ## Create .venv and install all dependencies
+	@if [ -d .venv ] && ! .venv/bin/python -c "import pip" >/dev/null 2>&1; then \
+		echo "  Existing .venv is broken (shebangs point at a missing interpreter) — rebuilding"; \
+		rm -rf .venv; \
+	fi
 	@test -d .venv || python3 -m venv .venv
 	$(MAKE) deps PIP=.venv/bin/pip
 	@echo "$(CURDIR)/services/debug" > $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
