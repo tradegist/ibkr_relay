@@ -8,6 +8,7 @@ For deployment and user-facing documentation, see the [README](README.md).
 
 - [Commands](#commands)
 - [Testing](#testing)
+- [IBKR Fixtures](#ibkr-fixtures)
 - [TypeScript Types](#typescript-types)
 - [Python Types](#python-types)
 - [Project Structure](#project-structure)
@@ -197,6 +198,66 @@ make sync ENV=local          # explicit: restart local stack
 ```
 
 `make local-up` is only needed for the initial build or after changing `requirements.txt` / Dockerfile.
+
+## IBKR Fixtures
+
+Sanitized Flex XML responses live in `services/relays/ibkr/fixtures/`:
+
+- `activity_flex_sample.xml` — Activity Flex (`<Trade>` rows)
+- `trade_confirm_sample.xml` — Trade Confirmation (`<TradeConfirm>` rows)
+
+The `TestLiveFixtures` tests in `services/relays/ibkr/test_flex_parser.py` parse these at CI time, so they double as a **schema-drift alarm**: if IBKR renames or removes an attribute the parser depends on, the next fixture refresh fails these tests instead of silently shipping a regression.
+
+### Refreshing a fixture
+
+Requires `IBKR_FLEX_TOKEN` and `IBKR_FLEX_QUERY_ID` (or `_2` suffix variants) in `.env.relays`.
+
+```bash
+make ibkr-flex-refresh          # primary query (IBKR_FLEX_QUERY_ID)
+make ibkr-flex-refresh S=_2     # secondary query (IBKR_FLEX_QUERY_ID_2)
+```
+
+The target:
+
+1. Fetches a live response into `services/relays/ibkr/fixtures/raw.xml`
+2. Detects the response type by grepping for `<TradeConfirm` in the XML
+3. Runs `sanitize.py` to produce either `activity_flex_sample.xml` or `trade_confirm_sample.xml`
+4. Deletes `raw.xml`
+
+If fetch or sanitize fails, `raw.xml` is left in place for inspection — the `&&` chaining in the recipe prevents partial cleanup.
+
+### Just dumping (no sanitize)
+
+```bash
+make ibkr-flex-dump F=/tmp/raw.xml       # primary query → file
+make ibkr-flex-dump S=_2 F=/tmp/raw2.xml # secondary query → file
+make ibkr-flex-dump                      # writes to stdout
+```
+
+Useful for inspecting a response without overwriting the committed fixture.
+
+### Sanitizer rules
+
+`services/relays/ibkr/fixtures/sanitize.py` is regex-based on `attr="value"` pairs, so it preserves the source document's attribute order and whitespace byte-for-byte apart from the redacted values — ideal for reviewing diffs on refresh. Two classes of replacement:
+
+- **Static attrs** (`accountId`, `acctAlias`, `model`, `traderID`, origin/related IDs) — single constant across every row (account-level facts don't vary per fill).
+- **Per-row attrs** (`tradeID`, `ibExecID`/`execID`, `ibOrderID`/`orderID`, `transactionID`, `brokerageOrderID`, `exchOrderId`, `extExecID`) — a 1-indexed counter substituted into a template. First row gets `{n}=1`, second `{n}=2`, etc. Without this the parser's execId-based dedup would collapse multi-row dumps into a single fill.
+
+The sanitizer caps each fixture at `_MAX_ROWS = 3`. Live Flex responses can contain dozens of rows; a fixture only needs a handful for schema-drift detection.
+
+**Idempotent** — re-running `sanitize.py` on an already-sanitized file produces byte-identical output. Safe to run `make ibkr-flex-refresh` repeatedly.
+
+### Safety: raw dumps are gitignored
+
+`.gitignore` ignores `services/relays/ibkr/fixtures/raw*.xml` — raw responses contain real execution IDs (paper or live) and must never be committed. Stick to the `raw*.xml` pattern when dumping manually, or use `make ibkr-flex-refresh` which cleans up after itself.
+
+### When to refresh
+
+- **After noticing unknown attributes in logs.** The parser forwards unknown attrs into `Fill.raw` silently; a fixture refresh is how you'd notice IBKR added new ones.
+- **Quarterly.** IBKR adds attributes occasionally. A scheduled refresh catches drift before a real edge case does.
+- **After changing the parser.** Edits to `flex_parser.py`'s alias map or `_FILL_TAGS` — re-running the fixture tests verifies nothing regressed.
+
+The committed fixture diff on refresh is itself a useful "what changed at IBKR" log — a refresh with no diff means the schema is stable.
 
 ## TypeScript Types
 
