@@ -19,6 +19,18 @@ The listener (ib_async source) populates a smaller raw dict:
   ibExecId, orderId, side, quantity, price, symbol, assetCategory,
   exchange, currency, commission, commissionCurrency, fifoPnlRealized,
   dateTime, accountId
+
+References (IBKR official field dictionaries — authoritative source for
+what attributes Flex XML may contain):
+  Activity Flex Query Reference:
+    https://www.ibkrguides.com/reportingreference/reportguide/activity%20flex%20query%20reference.htm
+  Trade Confirmation Flex Query Reference:
+    https://www.ibkrguides.com/reportingreference/reportguide/trade%20confirmation%20flex%20query%20reference.htm
+  Trades section (Activity Flex):
+    https://www.ibkrguides.com/reportingreference/reportguide/tradesfq.htm
+
+Answer to "is there an exchange-rate field?": Flex uses `fxRateToBase`
+(asset currency → base currency), not `exchangeRate`.
 """
 
 import logging
