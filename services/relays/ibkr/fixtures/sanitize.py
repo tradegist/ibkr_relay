@@ -25,6 +25,10 @@ Regex-based on ``attr="value"`` pairs so attribute order and whitespace in
 the source document are preserved byte-for-byte apart from the redacted
 values — ideal for reviewing diffs when the fixture is refreshed.
 
+Also caps the fixture at ``_MAX_ROWS`` fill elements.  Live Flex responses
+can contain many dozens of ``<Trade>`` / ``<TradeConfirm>`` rows; a fixture
+only needs a handful for schema-drift detection.
+
 Idempotent: re-running on an already-sanitized file produces identical
 output (row 1 always gets ``{n}=1``, row 2 always gets ``{n}=2``, etc.).
 """
@@ -35,6 +39,11 @@ from collections.abc import Callable
 from itertools import count
 from pathlib import Path
 from re import Match
+
+_MAX_ROWS = 3
+
+# Fill element tag names, matching the parser's ``_FILL_TAGS``.
+_FILL_TAGS: tuple[str, ...] = ("TradeConfirmation", "TradeConfirm", "Trade")
 
 # Account-level — identical value across all rows.
 _STATIC: dict[str, str] = {
@@ -79,13 +88,38 @@ def _counting_replacer(attr: str, template: str) -> Callable[[Match[str]], str]:
     return replace
 
 
-def sanitize(xml_text: str) -> str:
-    """Return *xml_text* with sensitive attribute values replaced.
+def _row_limiter(max_rows: int) -> Callable[[Match[str]], str]:
+    """Return an ``re.sub`` callback that keeps the first ``max_rows``
+    matches and drops every subsequent match (including its preceding
+    whitespace)."""
+    counter = count(1)
+    def trim(match: Match[str]) -> str:
+        return match.group(0) if next(counter) <= max_rows else ""
+    return trim
+
+
+def _trim_rows(xml_text: str, max_rows: int) -> str:
+    """Keep only the first *max_rows* fill elements per tag type.
+
+    Handles self-closing ``<Trade ... />`` / ``<TradeConfirm ... />`` /
+    ``<TradeConfirmation ... />`` elements — the only form IBKR emits
+    for Flex fill rows.
+    """
+    out = xml_text
+    for tag in _FILL_TAGS:
+        pattern = re.compile(rf'\s*<{tag}\b[^>]*?/>', re.DOTALL)
+        out = pattern.sub(_row_limiter(max_rows), out)
+    return out
+
+
+def sanitize(xml_text: str, max_rows: int = _MAX_ROWS) -> str:
+    """Return *xml_text* trimmed to ``max_rows`` fill elements and with
+    sensitive attribute values replaced.
 
     Uses ``\\b`` word boundaries so that ``tradeID`` does not match
     ``origTradeID`` (and similar prefix/suffix overlaps).
     """
-    out = xml_text
+    out = _trim_rows(xml_text, max_rows)
     for attr, value in _STATIC.items():
         pattern = rf'\b{re.escape(attr)}="[^"]*"'
         out = re.sub(pattern, f'{attr}="{value}"', out)
