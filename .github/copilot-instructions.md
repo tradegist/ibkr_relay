@@ -195,11 +195,13 @@ Use the existing `ibkr` and `kraken` relays as reference implementations. IBKR d
    - Makefile: add to `lint:` and `typecheck:` targets.
    - `.dockerignore`: add `!services/relays/<name>/**` if needed (currently `!services/relays/**` covers all relay packages).
 
-6. **Write tests** — colocate unit tests next to the source files (e.g. `test_<name>.py`).
+6. **Timestamp normalisation** — every `Fill.timestamp` must be in the canonical form `YYYY-MM-DDTHH:MM:SS` (UTC, no `Z`, no fractional seconds). See the [Timestamp normalisation convention](#timestamp-normalisation-convention-apply-to-all-relay-adapters) section below. If the broker's native timestamp format is not ISO-8601, add a `services/relays/<name>/timestamps.py` with a small `<format>_to_iso(raw) -> str` helper that validates and converts. The Flex/bridge parsers chain it as `normalize_timestamp(<format>_to_iso(raw), assume_tz=tz)`. **Never add broker format knowledge to `services/shared/time_format.py`** — that module must stay broker-agnostic.
 
-7. **Update README** — add the relay's env vars, webhook payload examples, and any broker-specific setup instructions.
+7. **Write tests** — colocate unit tests next to the source files (e.g. `test_<name>.py`). If you added a `timestamps.py`, add a `test_timestamps.py` with positive + negative cases (the point of the helper is to reject typos that `datetime.fromisoformat` would silently accept).
 
-8. **Verify** — `make test`, `make typecheck`, `make lint` must all pass.
+8. **Update README** — add the relay's env vars, webhook payload examples, and any broker-specific setup instructions.
+
+9. **Verify** — `make test`, `make typecheck`, `make lint` must all pass.
 
 ### Env file flow
 
@@ -418,6 +420,33 @@ When mapping a broker fill to a `Fill` model, use this priority order for the `f
 4. Return `0.0` when no fee information is available.
 
 See `services/relays/kraken/ws_parser.py` (`_extract_fee`) for the reference implementation.
+
+### Timestamp normalisation convention (apply to all relay adapters)
+
+Every `Fill.timestamp` reaching the engine **must** be in the canonical form `YYYY-MM-DDTHH:MM:SS` — always UTC, no `Z` suffix, no `+00:00`, no fractional seconds. Lexicographic order equals chronological order (this is relied on by the poll-watermark comparison in `poller_engine.py`).
+
+The normalisation pipeline has two layers with a strict split of responsibilities:
+
+1. **Relay-owned** — broker-specific format → ISO-8601. Lives in `services/relays/<name>/timestamps.py`. One small function per native format, each using `strptime` to validate strictly and return a naive ISO-8601 string.
+2. **Shared** — ISO-8601 → canonical UTC. Lives in `services/shared/time_format.py::normalize_timestamp(iso, *, assume_tz=None)`. Applies `assume_tz` to naive inputs, converts tz-aware inputs to UTC, strips fractional seconds. It **only** accepts ISO-8601 — never teach it about broker formats.
+
+Call sites chain the two:
+
+```python
+ts = normalize_timestamp(flex_to_iso(raw), assume_tz=tz)    # IBKR Flex
+ts = normalize_timestamp(bridge_to_iso(raw), assume_tz=tz)  # IBKR bridge
+ts = normalize_timestamp(raw)                               # Kraken (already ISO)
+```
+
+**Why the split matters.** Without it, every new relay would append another regex or `strptime` branch to `shared/time_format.py`, which would become a junk drawer of broker quirks. Keeping format knowledge colocated with the relay package means:
+
+- Each broker's format is documented and tested next to the code that produces it.
+- `shared/time_format.py` stays tiny and broker-agnostic.
+- `datetime.fromisoformat` in Python 3.12+ is *very* lenient (it accepts IBKR-style `YYYYMMDD-HH:MM:SS` and `YYYYMMDD;HHMMSS` directly). The relay-level helper exists specifically to **reject typos and wrong separators** that `fromisoformat` would silently misinterpret — it's a validation gate, not a parsing fallback.
+
+**Timezone handling.** Brokers that emit naive timestamps (IBKR Flex, IBKR bridge) need a `{RELAY}_ACCOUNT_TIMEZONE` env var (e.g. `IBKR_ACCOUNT_TIMEZONE=America/New_York`). Read it via a getter that calls `shared.parse_timezone(name)` and converts `ValueError` to `SystemExit` at boot. The resulting `ZoneInfo` is threaded into parse callbacks via `build_relay()` (closure-capture, not re-read per fill). Brokers that emit tz-aware timestamps (Kraken with `Z`) don't need an env var — `normalize_timestamp` ignores `assume_tz` when the input is tz-aware.
+
+See `services/relays/ibkr/timestamps.py` and `services/shared/time_format.py` for the reference implementation.
 
 ## Notifier Package
 

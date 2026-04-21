@@ -189,7 +189,8 @@ class TestParseRestTrade(unittest.TestCase):
 
     def test_timestamp_is_utc_iso_string(self) -> None:
         fill = _parse_rest_trade("T1", _make_rest_trade())
-        expected = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(1744447200.0))
+        # Canonical form: UTC, no Z suffix, no fractional seconds.
+        expected = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(1744447200.0))
         self.assertEqual(fill.timestamp, expected)
 
     def test_raw_contains_txid_and_trade_data(self) -> None:

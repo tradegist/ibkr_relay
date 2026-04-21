@@ -1,6 +1,7 @@
 """Comprehensive tests for IBKR Flex XML parser."""
 
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -307,7 +308,14 @@ class TestFieldNormalization:
     def test_af_dateTime_maps_to_timestamp(self) -> None:
         xml = _wrap_af(AF_AAPL)
         fills, _ = parse_fills(xml)
-        assert fills[0].timestamp == "20250403;153000"
+        assert fills[0].timestamp == "2025-04-03T15:30:00"
+
+    def test_af_dateTime_converts_from_account_tz(self) -> None:
+        from zoneinfo import ZoneInfo
+        xml = _wrap_af(AF_AAPL)
+        # 15:30 NY (EDT, -04:00 in April) → 19:30 UTC
+        fills, _ = parse_fills(xml, tz=ZoneInfo("America/New_York"))
+        assert fills[0].timestamp == "2025-04-03T19:30:00"
 
     def test_af_orderType_normalized(self) -> None:
         xml = _wrap_af(AF_AAPL)
@@ -630,7 +638,7 @@ class TestAllFieldsRoundTrip:
         assert f.volume == pytest.approx(1.0)
         assert f.cost == pytest.approx(254.6)
         assert f.fee == pytest.approx(0.62125)
-        assert f.timestamp == "20250403;153000"
+        assert f.timestamp == "2025-04-03T15:30:00"
         assert f.source == "flex"
 
     def test_af_raw_dict_ibkr_fields(self) -> None:
@@ -750,7 +758,7 @@ class TestAggregateMultipleFills:
         assert two_fill_trade.symbol == "TEST"
 
     def test_max_timestamp(self, two_fill_trade: Trade) -> None:
-        assert two_fill_trade.timestamp == "20250402;140000"
+        assert two_fill_trade.timestamp == "2025-04-02T14:00:00"
 
     def test_raw_from_first_fill(self, two_fill_trade: Trade) -> None:
         assert two_fill_trade.raw["transactionId"] == "F1"
@@ -889,6 +897,16 @@ class TestLiveFixtures:
         assert fill.source == "flex"
         # execId flows from the sanitized ibExecID constant
         assert fill.execId == "00018d97.00000001.01.01"
+        # Fixture has dateTime="20260413;093014" — canonical form, default UTC.
+        assert fill.timestamp == "2026-04-13T09:30:14"
+
+    def test_activity_flex_sample_timestamp_with_tz(self) -> None:
+        """With IBKR_ACCOUNT_TIMEZONE=America/New_York, the 09:30:14 NY time
+        (EDT, -04:00 in April) converts to 13:30:14 UTC."""
+        xml = (_FIXTURES_DIR / "activity_flex_sample.xml").read_text()
+        fills, errors = parse_fills(xml, tz=ZoneInfo("America/New_York"))
+        assert errors == []
+        assert fills[0].timestamp == "2026-04-13T13:30:14"
 
     def test_trade_confirm_sample_parses_cleanly(self) -> None:
         xml = (_FIXTURES_DIR / "trade_confirm_sample.xml").read_text()
@@ -909,3 +927,16 @@ class TestLiveFixtures:
         assert by_symbol["AAPL"].execId == "00018d97.00000001.01.01"
         assert by_symbol["GOOG"].execId == "00018d97.00000002.01.01"
         assert len({f.execId for f in fills}) == len(fills)
+        # Fixture has dateTime="20250403;153000" (AAPL) and ";153001" (GOOG).
+        # Default tz=UTC → canonical form unchanged.
+        assert by_symbol["AAPL"].timestamp == "2025-04-03T15:30:00"
+        assert by_symbol["GOOG"].timestamp == "2025-04-03T15:30:01"
+
+    def test_trade_confirm_sample_timestamp_with_tz(self) -> None:
+        """15:30 NY (EDT, -04:00 in April) → 19:30 UTC."""
+        xml = (_FIXTURES_DIR / "trade_confirm_sample.xml").read_text()
+        fills, errors = parse_fills(xml, tz=ZoneInfo("America/New_York"))
+        assert errors == []
+        by_symbol = {f.symbol: f for f in fills}
+        assert by_symbol["AAPL"].timestamp == "2025-04-03T19:30:00"
+        assert by_symbol["GOOG"].timestamp == "2025-04-03T19:30:01"

@@ -68,8 +68,9 @@ def _parse_rest_trade(txid: str, data: KrakenRestTrade) -> Fill:
     else:
         raise ValueError(f"{ctx}: invalid trade side {side_str!r}")
 
+    # Kraken REST returns a Unix epoch; format directly into canonical UTC.
     ts = time.strftime(
-        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(require_float(data, "time", ctx))
+        "%Y-%m-%dT%H:%M:%S", time.gmtime(require_float(data, "time", ctx))
     )
 
     order_type = normalize_order_type(require_str(data, "ordertype", ctx))

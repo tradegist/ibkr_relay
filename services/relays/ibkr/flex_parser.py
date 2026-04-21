@@ -35,10 +35,12 @@ Answer to "is there an exchange-rate field?": Flex uses `fxRateToBase`
 
 import logging
 import xml.etree.ElementTree as ET
+from datetime import tzinfo
 from typing import Any
 
-from shared import BuySell, Fill
+from shared import BuySell, Fill, normalize_timestamp
 
+from .timestamps import flex_to_iso
 from .utilities import normalize_asset_class, normalize_order_type
 
 log = logging.getLogger("flex_parser")
@@ -93,8 +95,14 @@ def _parse_float(value: str, field: str, errors: list[str]) -> float:
 
 # ── Parse ────────────────────────────────────────────────────────────────
 
-def parse_fills(xml_text: str) -> tuple[list[Fill], list[str]]:
+def parse_fills(
+    xml_text: str, *, tz: tzinfo | None = None,
+) -> tuple[list[Fill], list[str]]:
     """Parse Flex XML into individual Fill objects.
+
+    *tz* is the IANA timezone to interpret IBKR's naive ``dateTime``
+    values in (typically the account base tz from ``IBKR_ACCOUNT_TIMEZONE``).
+    Defaults to UTC when omitted.
 
     Returns ``(fills, errors)`` where *errors* contains warnings about
     unknown attributes and any per-row parse problems.  Parsing never
@@ -152,6 +160,22 @@ def parse_fills(xml_text: str) -> tuple[list[Fill], list[str]]:
             # Build CommonFill
             currency_raw = str(raw.get("currency", "")).strip().upper()
             currency = currency_raw or None
+
+            ts_raw = str(raw.get("dateTime", ""))
+            if ts_raw:
+                try:
+                    ts = normalize_timestamp(flex_to_iso(ts_raw), assume_tz=tz)
+                except ValueError as exc:
+                    errors.append(
+                        f"Skipping <{tag}> execId={exec_id}: bad dateTime {ts_raw!r}: {exc}"
+                    )
+                    continue
+            else:
+                # Minimal test fixtures sometimes omit dateTime. Pass through
+                # as empty so the fill is still parseable (the watermark and
+                # FX enrichment simply skip fills without a usable timestamp).
+                ts = ""
+
             try:
                 fill = Fill(
                     execId=exec_id,
@@ -164,7 +188,7 @@ def parse_fills(xml_text: str) -> tuple[list[Fill], list[str]]:
                     volume=float(raw.get("quantity", 0.0)),
                     cost=float(raw.get("cost", 0.0)),
                     fee=abs(float(raw.get("commission", 0.0))),
-                    timestamp=str(raw.get("dateTime", "")),
+                    timestamp=ts,
                     source="flex",
                     currency=currency,
                     raw=raw,

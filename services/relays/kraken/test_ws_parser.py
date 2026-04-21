@@ -144,7 +144,7 @@ class TestParseFill(unittest.TestCase):
         self.assertEqual(fill.price, 65000.0)
         self.assertEqual(fill.volume, 0.1)
         self.assertEqual(fill.cost, 6500.0)
-        self.assertEqual(fill.timestamp, "2026-04-12T10:00:00Z")
+        self.assertEqual(fill.timestamp, "2026-04-12T10:00:00")
         self.assertEqual(fill.source, "ws_execution")
 
     def test_buy_side(self) -> None:
@@ -199,7 +199,7 @@ class TestParseFill(unittest.TestCase):
             "last_price": 1.0,
             "last_qty": 1.0,
             "cost": 1.0,
-            "timestamp": "ts",
+            "timestamp": "2026-04-12T10:00:00Z",
         }
         fill = _parse_fill(item)
         self.assertEqual(fill.fee, 0.0)

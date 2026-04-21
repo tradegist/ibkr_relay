@@ -5,12 +5,14 @@ import os
 import unittest
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 from relay_core import get_debounce_ms, get_poll_interval, is_listener_enabled
 from relays.ibkr import (
     _build_connect,
     _build_poller_configs,
     _event_filter,
+    _get_account_timezone,
     _get_bridge_api_token,
     _get_bridge_ws_url,
     _get_flex_query_id,
@@ -30,6 +32,8 @@ from .bridge_models import (
     WsExecution,
     WsFill,
 )
+
+_TEST_TZ = ZoneInfo("UTC")
 
 # ── Env var setup ────────────────────────────────────────────────────
 
@@ -184,6 +188,25 @@ class TestEnvVarGetters(unittest.TestCase):
             get_debounce_ms("ibkr")
         self.assertIn("IBKR_LISTENER_DEBOUNCE_MS", str(cm.exception))
 
+    # ── IBKR_ACCOUNT_TIMEZONE ──
+
+    def test_account_timezone_defaults_to_utc(self) -> None:
+        with patch.dict(os.environ, {"IBKR_ACCOUNT_TIMEZONE": ""}):
+            tz = _get_account_timezone()
+        self.assertEqual(tz.key, "UTC")
+
+    def test_account_timezone_valid_iana(self) -> None:
+        with patch.dict(os.environ, {"IBKR_ACCOUNT_TIMEZONE": "America/New_York"}):
+            tz = _get_account_timezone()
+        self.assertEqual(tz.key, "America/New_York")
+
+    def test_account_timezone_invalid_raises_system_exit(self) -> None:
+        with patch.dict(os.environ, {"IBKR_ACCOUNT_TIMEZONE": "Not/A_Zone"}), \
+             self.assertRaises(SystemExit) as cm:
+            _get_account_timezone()
+        self.assertIn("IBKR_ACCOUNT_TIMEZONE", str(cm.exception))
+        self.assertIn("Not/A_Zone", str(cm.exception))
+
 
 # ── Event filter tests ───────────────────────────────────────────────
 
@@ -215,29 +238,49 @@ class TestMapFill(unittest.TestCase):
 
     def test_bot_maps_to_buy(self) -> None:
         envelope = _make_envelope(side="BOT")
-        fill = _map_fill(envelope)
+        fill = _map_fill(envelope, _TEST_TZ)
         assert fill is not None
         self.assertEqual(fill.side, BuySell.BUY)
 
     def test_sld_maps_to_sell(self) -> None:
         envelope = _make_envelope(side="SLD")
-        fill = _map_fill(envelope)
+        fill = _map_fill(envelope, _TEST_TZ)
         assert fill is not None
         self.assertEqual(fill.side, BuySell.SELL)
 
     def test_unknown_side_returns_none(self) -> None:
-        self.assertIsNone(_map_fill(_make_envelope(side="UNKNOWN")))
+        self.assertIsNone(_map_fill(_make_envelope(side="UNKNOWN"), _TEST_TZ))
 
     def test_no_fill_returns_none(self) -> None:
-        self.assertIsNone(_map_fill(_make_envelope(has_fill=False)))
+        self.assertIsNone(_map_fill(_make_envelope(has_fill=False), _TEST_TZ))
 
     def test_empty_exec_id_returns_none(self) -> None:
-        self.assertIsNone(_map_fill(_make_envelope(exec_id="")))
+        self.assertIsNone(_map_fill(_make_envelope(exec_id=""), _TEST_TZ))
 
     def test_fee_is_positive(self) -> None:
-        fill = _map_fill(_make_envelope())
+        fill = _map_fill(_make_envelope(), _TEST_TZ)
         assert fill is not None
         self.assertGreater(fill.fee, 0)
+
+    def test_timestamp_is_canonical_utc(self) -> None:
+        """The fixture's 20260411-10:30:00 (UTC) should pass through unchanged."""
+        fill = _map_fill(_make_envelope(), _TEST_TZ)
+        assert fill is not None
+        self.assertEqual(fill.timestamp, "2026-04-11T10:30:00")
+
+    def test_timestamp_converted_from_account_tz(self) -> None:
+        """Same wall-clock, different assumed tz → different UTC output."""
+        ny = ZoneInfo("America/New_York")
+        fill = _map_fill(_make_envelope(), ny)
+        assert fill is not None
+        # 10:30 NY in April (EDT, -04:00) → UTC 14:30
+        self.assertEqual(fill.timestamp, "2026-04-11T14:30:00")
+
+    def test_bad_timestamp_returns_none(self) -> None:
+        bad_envelope = _make_envelope()
+        assert bad_envelope.fill is not None
+        bad_envelope.fill.execution.time = "not-a-timestamp"
+        self.assertIsNone(_map_fill(bad_envelope, _TEST_TZ))
 
 
 # ── on_message dispatch tests ───────────────────────────────────────
@@ -247,7 +290,7 @@ class TestOnMessage(unittest.IsolatedAsyncioTestCase):
     """Test the adapter's on_message callback dispatch logic."""
 
     async def test_commission_returns_fill_with_mark(self) -> None:
-        handler = _on_message_factory(exec_events_enabled=False)
+        handler = _on_message_factory(exec_events_enabled=False, tz=_TEST_TZ)
         envelope = _make_envelope(event_type="commissionReportEvent")
         data: dict[str, Any] = envelope.model_dump()
 
@@ -261,7 +304,7 @@ class TestOnMessage(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[0].fill.execId, "0001")
 
     async def test_exec_event_returns_fill_without_mark_when_enabled(self) -> None:
-        handler = _on_message_factory(exec_events_enabled=True)
+        handler = _on_message_factory(exec_events_enabled=True, tz=_TEST_TZ)
         envelope = _make_envelope(event_type="execDetailsEvent")
         data: dict[str, Any] = envelope.model_dump()
 
@@ -272,7 +315,7 @@ class TestOnMessage(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(results[0].mark)
 
     async def test_exec_event_skipped_when_disabled(self) -> None:
-        handler = _on_message_factory(exec_events_enabled=False)
+        handler = _on_message_factory(exec_events_enabled=False, tz=_TEST_TZ)
         envelope = _make_envelope(event_type="execDetailsEvent")
         data: dict[str, Any] = envelope.model_dump()
 
@@ -281,7 +324,7 @@ class TestOnMessage(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results, [])
 
     async def test_invalid_envelope_skipped(self) -> None:
-        handler = _on_message_factory(exec_events_enabled=True)
+        handler = _on_message_factory(exec_events_enabled=True, tz=_TEST_TZ)
         data: dict[str, Any] = {"type": "commissionReportEvent", "bad": "data"}
 
         results = await handler(data)
@@ -296,7 +339,7 @@ class TestBuildPollerConfigs(unittest.TestCase):
     """Test poller config construction from env vars."""
 
     def test_single_poller(self) -> None:
-        configs = _build_poller_configs()
+        configs = _build_poller_configs(_TEST_TZ)
         self.assertEqual(len(configs), 1)
         self.assertEqual(configs[0].interval, 300)
 
@@ -305,19 +348,19 @@ class TestBuildPollerConfigs(unittest.TestCase):
             "IBKR_FLEX_TOKEN_2": "tok2",
             "IBKR_FLEX_QUERY_ID_2": "789",
         }):
-            configs = _build_poller_configs()
+            configs = _build_poller_configs(_TEST_TZ)
             self.assertEqual(len(configs), 2)
 
     def test_second_poller_falls_back_to_primary_token(self) -> None:
         """Only IBKR_FLEX_QUERY_ID_2 set → uses primary IBKR_FLEX_TOKEN."""
         with patch.dict(os.environ, {"IBKR_FLEX_QUERY_ID_2": "789"}):
-            configs = _build_poller_configs()
+            configs = _build_poller_configs(_TEST_TZ)
             self.assertEqual(len(configs), 2)
 
     def test_second_poller_skipped_without_query_id(self) -> None:
         with patch.dict(os.environ, {"IBKR_FLEX_TOKEN_2": "tok2"}):
             # Missing IBKR_FLEX_QUERY_ID_2 → no second poller
-            configs = _build_poller_configs()
+            configs = _build_poller_configs(_TEST_TZ)
             self.assertEqual(len(configs), 1)
 
     def test_second_poller_no_token_at_all_raises(self) -> None:
@@ -328,7 +371,7 @@ class TestBuildPollerConfigs(unittest.TestCase):
             "IBKR_FLEX_QUERY_ID_2": "789",
         }
         with patch.dict(os.environ, env), self.assertRaises(SystemExit) as cm:
-            _build_poller_configs()
+            _build_poller_configs(_TEST_TZ)
         self.assertIn("IBKR_FLEX_TOKEN", str(cm.exception))
 
     def test_no_flex_creds_returns_empty(self) -> None:
@@ -338,27 +381,27 @@ class TestBuildPollerConfigs(unittest.TestCase):
             "IBKR_FLEX_QUERY_ID": "",
         }
         with patch.dict(os.environ, env):
-            configs = _build_poller_configs()
+            configs = _build_poller_configs(_TEST_TZ)
         self.assertEqual(configs, [])
 
     def test_poller_disabled_returns_empty(self) -> None:
         """IBKR_POLLER_ENABLED=false → empty list even with creds."""
         with patch.dict(os.environ, {"IBKR_POLLER_ENABLED": "false"}):
-            configs = _build_poller_configs()
+            configs = _build_poller_configs(_TEST_TZ)
         self.assertEqual(configs, [])
 
     def test_partial_config_raises(self) -> None:
         """Token without query ID → SystemExit."""
         env = {"IBKR_FLEX_TOKEN": "tok", "IBKR_FLEX_QUERY_ID": ""}
         with patch.dict(os.environ, env), self.assertRaises(SystemExit) as cm:
-            _build_poller_configs()
+            _build_poller_configs(_TEST_TZ)
         self.assertIn("IBKR_FLEX_QUERY_ID", str(cm.exception))
 
     def test_partial_config_reverse_raises(self) -> None:
         """Query ID without token → SystemExit."""
         env = {"IBKR_FLEX_TOKEN": "", "IBKR_FLEX_QUERY_ID": "123"}
         with patch.dict(os.environ, env), self.assertRaises(SystemExit) as cm:
-            _build_poller_configs()
+            _build_poller_configs(_TEST_TZ)
         self.assertIn("IBKR_FLEX_TOKEN", str(cm.exception))
 
 

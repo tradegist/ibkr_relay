@@ -9,6 +9,7 @@ import logging
 import os
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -24,11 +25,12 @@ from relay_core import (
     is_listener_enabled,
     is_poller_enabled,
 )
-from shared import BuySell, Fill, Source
+from shared import BuySell, Fill, Source, normalize_timestamp, parse_timezone
 
 from .bridge_models import WsEnvelope
 from .flex_fetch import RedactTokenFilter, fetch_flex_report
 from .flex_parser import parse_fills
+from .timestamps import bridge_to_iso
 from .utilities import normalize_asset_class
 
 log = logging.getLogger("relays.ibkr")
@@ -67,6 +69,30 @@ def _is_exec_events_enabled() -> bool:
     return val not in ("0", "false", "no", "")
 
 
+def _get_account_timezone() -> ZoneInfo:
+    """Return the IANA tz for IBKR timestamps (defaults to UTC).
+
+    IBKR reports every trade timestamp (both Flex XML and ib_async bridge
+    events) in the account's base timezone with no tz label. Without
+    this hint, naive timestamps get treated as UTC — fine if the account
+    is actually UTC, wrong otherwise. Setting ``IBKR_ACCOUNT_TIMEZONE``
+    to a valid IANA zone (e.g. ``America/New_York``) makes the engine
+    convert the broker's local time to UTC before storing.
+
+    Validated fail-fast at boot: an invalid value raises ``SystemExit``.
+    """
+    raw = os.environ.get("IBKR_ACCOUNT_TIMEZONE", "").strip()
+    if not raw:
+        return ZoneInfo("UTC")
+    try:
+        return parse_timezone(raw)
+    except ValueError as exc:
+        raise SystemExit(
+            f"Invalid IBKR_ACCOUNT_TIMEZONE={raw!r} — must be a valid IANA"
+            f" timezone (e.g. America/New_York, Europe/Zurich, UTC): {exc}"
+        ) from None
+
+
 # ── Flex poller adapter ──────────────────────────────────────────────
 
 def _build_fetch(flex_token: str, flex_query_id: str) -> Callable[[], str | None]:
@@ -80,7 +106,14 @@ def _build_fetch(flex_token: str, flex_query_id: str) -> Callable[[], str | None
     return fetch
 
 
-def _build_poller_configs() -> list[PollerConfig]:
+def _build_parse(tz: ZoneInfo) -> Callable[[str], tuple[list[Fill], list[str]]]:
+    """Bind the IBKR account timezone into the Flex parser callback."""
+    def parse(xml: str) -> tuple[list[Fill], list[str]]:
+        return parse_fills(xml, tz=tz)
+    return parse
+
+
+def _build_poller_configs(tz: ZoneInfo) -> list[PollerConfig]:
     """Build PollerConfig(s) from env vars.
 
     Detects IBKR_FLEX_QUERY_ID_2 etc. for multi-account support.
@@ -92,6 +125,7 @@ def _build_poller_configs() -> list[PollerConfig]:
 
     configs: list[PollerConfig] = []
     interval = get_poll_interval("ibkr")
+    parse = _build_parse(tz)
 
     # Primary poller — optional (both must be set, or both unset)
     token = _get_flex_token()
@@ -99,7 +133,7 @@ def _build_poller_configs() -> list[PollerConfig]:
     if token and query_id:
         configs.append(PollerConfig(
             fetch=_build_fetch(token, query_id),
-            parse=parse_fills,
+            parse=parse,
             interval=interval,
         ))
     elif token or query_id:
@@ -120,7 +154,7 @@ def _build_poller_configs() -> list[PollerConfig]:
             )
         configs.append(PollerConfig(
             fetch=_build_fetch(token_2, query_2),
-            parse=parse_fills,
+            parse=parse,
             interval=interval,
         ))
 
@@ -136,12 +170,15 @@ _SIDE_MAP: dict[str, BuySell] = {
 }
 
 
-def _map_fill(envelope: WsEnvelope) -> Fill | None:
+def _map_fill(envelope: WsEnvelope, tz: ZoneInfo) -> Fill | None:
     """Map a WsEnvelope with fill data to a relay Fill model.
 
     Returns None and logs an error if:
     - The envelope has no fill data (status events).
     - The execution side is not ``"BOT"`` or ``"SLD"``.
+    - The execution time cannot be parsed.
+
+    *tz* is the IANA timezone to interpret IBKR's naive timestamps in.
     """
     if envelope.fill is None:
         log.error(
@@ -171,6 +208,15 @@ def _map_fill(envelope: WsEnvelope) -> Fill | None:
         )
         return None
 
+    try:
+        ts = normalize_timestamp(bridge_to_iso(ex.time), assume_tz=tz)
+    except ValueError as exc:
+        log.error(
+            "Bad execution time %r for execId=%s — skipping fill: %s",
+            ex.time, exec_id, exc,
+        )
+        return None
+
     source = cast(Source, envelope.type)
     currency = contract.currency.strip().upper() or None
 
@@ -185,7 +231,7 @@ def _map_fill(envelope: WsEnvelope) -> Fill | None:
         volume=ex.shares,
         cost=ex.price * ex.shares,
         fee=abs(cr.commission),  # Always positive (amount paid)
-        timestamp=ex.time,
+        timestamp=ts,
         source=source,
         currency=currency,
         raw=envelope.model_dump(),
@@ -209,7 +255,7 @@ def _event_filter(data: dict[str, Any]) -> bool:
 
 
 def _on_message_factory(
-    exec_events_enabled: bool,
+    exec_events_enabled: bool, tz: ZoneInfo,
 ) -> Callable[[dict[str, Any]], Awaitable[list[OnMessageResult]]]:
     """Build an on_message callback with exec_events_enabled baked in."""
     async def handler(
@@ -223,7 +269,7 @@ def _on_message_factory(
             log.exception("Failed to validate IBKR WsEnvelope (type=%s)", event_type)
             return []
 
-        fill = _map_fill(envelope)
+        fill = _map_fill(envelope, tz)
         if fill is None:
             return []
 
@@ -289,7 +335,7 @@ def _build_connect(
     return connect
 
 
-def _build_listener_config() -> ListenerConfig | None:
+def _build_listener_config(tz: ZoneInfo) -> ListenerConfig | None:
     """Build ListenerConfig if listener is enabled, else return None."""
     if not is_listener_enabled("ibkr"):
         return None
@@ -298,7 +344,7 @@ def _build_listener_config() -> ListenerConfig | None:
 
     return ListenerConfig(
         connect=_build_connect(_get_bridge_ws_url(), _get_bridge_api_token()),
-        on_message=_on_message_factory(exec_events_enabled),
+        on_message=_on_message_factory(exec_events_enabled, tz),
         event_filter=_event_filter,
         debounce_ms=get_debounce_ms("ibkr"),
     )
@@ -315,8 +361,14 @@ def _on_start(ctx: StartupContext) -> None:
 
 def build_relay(notifiers: list[BaseNotifier]) -> BrokerRelay:
     """Build a fully configured IBKR relay instance."""
-    poller_configs = _build_poller_configs()
-    listener_config = _build_listener_config()
+    # Validate IBKR_ACCOUNT_TIMEZONE fail-fast at boot — if the user set
+    # a malformed value we want the container to exit immediately rather
+    # than silently defaulting or failing per-fill.
+    tz = _get_account_timezone()
+    log.info("IBKR account timezone: %s", tz.key)
+
+    poller_configs = _build_poller_configs(tz)
+    listener_config = _build_listener_config(tz)
 
     if not poller_configs and listener_config is None:
         raise SystemExit(
