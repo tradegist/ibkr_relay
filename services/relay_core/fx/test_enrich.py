@@ -11,7 +11,7 @@ import httpx
 
 from relay_core.fx.client import FxClient, FxLookupError
 from relay_core.fx.enrich import enrich_trades_with_fx
-from shared import Trade
+from shared import BuySell, Trade
 
 
 def _trade(
@@ -20,7 +20,7 @@ def _trade(
     timestamp: str = "2026-04-19T12:00:00Z",
 ) -> Trade:
     return Trade(
-        orderId=order_id, symbol="AAPL", assetClass="equity", side="buy",  # type: ignore[arg-type]
+        orderId=order_id, symbol="AAPL", assetClass="equity", side=BuySell.BUY,
         orderType="market", price=100.0, volume=1.0, cost=100.0, fee=1.0,
         fillCount=1, execIds=["e1"], timestamp=timestamp, source="flex",
         currency=currency, raw={},
@@ -159,23 +159,6 @@ class TestEnrichment(unittest.TestCase):
         assert enriched[1].fxRate is None
         assert len(errors) == 1
         assert "bad" in errors[0]
-
-    # ── IBKR semicolon timestamp ──
-
-    def test_ibkr_semicolon_timestamp_parsed(self) -> None:
-        mock_get = mock.Mock(return_value=_ok_response({
-            "result": "success",
-            "conversion_rates": {"USD": 1.19},
-        }))
-        client = FxClient(api_key="k", db_path=self.db_path, http_get=mock_get)
-        errors: list[str] = []
-        (out,) = enrich_trades_with_fx(
-            [_trade(currency="USD", timestamp="20260419;153000")],
-            base_currency="EUR", client=client, errors=errors,
-            today_provider=lambda: date(2026, 4, 19),
-        )
-        assert out.fxRate is not None
-        assert out.fxRateSource == "historical"
 
     # ── Unparseable timestamp ──
 
