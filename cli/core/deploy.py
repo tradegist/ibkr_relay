@@ -52,7 +52,8 @@ def _deploy_standalone():
     # it instead of creating a new one. Skip placeholder/invalid values.
     existing_ip = os.environ.get("DROPLET_IP", "").strip()
     try:
-        ipaddress.ip_address(existing_ip)
+        if ipaddress.ip_address(existing_ip).version != 4:
+            existing_ip = ""
     except ValueError:
         existing_ip = ""
     if existing_ip:
