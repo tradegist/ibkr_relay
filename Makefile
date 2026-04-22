@@ -185,16 +185,19 @@ logs: ## Stream logs (S=service ENV=local, default: poller on droplet)
 	if [ "$$env" = "local" ]; then \
 		$(LOCAL_COMPOSE) logs -f $(or $(S),relays); \
 	else \
+		[ -n "$$DROPLET_IP" ] || { echo "Error: DROPLET_IP not set — run 'make deploy' first"; exit 1; }; \
 		ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
 			'cd /opt/$(PROJECT) && docker compose logs -f $(or $(S),relays)'; \
 	fi
 
 stats: ## Show container resource usage
 	@. ./.env 2>/dev/null; . ./.env.droplet 2>/dev/null; \
+	[ -n "$$DROPLET_IP" ] || { echo "Error: DROPLET_IP not set — run 'make deploy' first"; exit 1; }; \
 	ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
 		'docker stats --no-stream'
 
 ssh: ## SSH into the droplet
 	@. ./.env 2>/dev/null; . ./.env.droplet 2>/dev/null; \
+	[ -n "$$DROPLET_IP" ] || { echo "Error: DROPLET_IP not set — run 'make deploy' first"; exit 1; }; \
 	ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP
 
