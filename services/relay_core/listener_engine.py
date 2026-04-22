@@ -41,13 +41,17 @@ class FatalListenerError(Exception):
 class OnMessageResult:
     """Return type for ListenerConfig.on_message.
 
-    *fill*: the parsed Fill, or None to skip the event.
+    *fill*: the parsed Fill, or None when the event could not be mapped.
     *mark*: if True, use full dedup+notify+mark pipeline;
             if False, fire-and-forget (no dedup, no mark).
+    *error*: human-readable reason why *fill* is None — included in the
+             webhook payload's ``errors`` field so consumers know a fill
+             was dropped and why.  Ignored when *fill* is set.
     """
 
     fill: Fill | None = None
     mark: bool = True
+    error: str | None = None
 
 
 # ── Listener configuration ───────────────────────────────────────────
@@ -121,6 +125,7 @@ def _send_and_mark(
     relay_name: RelayName,
     fills: list[Fill],
     db_path: str | None,
+    parse_errors: list[str] | None = None,
 ) -> None:
     """Dedup, aggregate, notify, and mark fills as processed.
 
@@ -128,43 +133,49 @@ def _send_and_mark(
     Creates a thread-local SQLite connection (never shares across threads).
     Resolves notifiers and retry config from the relay context.
 
+    *parse_errors* are fills that were dropped before reaching this function
+    (e.g. bad timestamp format).  They are included in the payload's
+    ``errors`` field so consumers know a fill was skipped and why.
+
     If all notifiers fail, ``NotificationError`` propagates — fills stay
     unprocessed and will be retried on the next event or reconnect.
     """
     relay = get_relay(relay_name)
     conn = _init_dedup_db(db_path)
+    _parse_errors = parse_errors or []
     try:
         prefixed_candidates = _prefix_ids(relay_name, fills)
         already_seen_prefixed = get_processed_ids(conn, prefixed_candidates)
         already_seen = _strip_prefix(relay_name, already_seen_prefixed)
         new_fills = [f for f in fills if f.execId not in already_seen]
 
-        if not new_fills:
+        if not new_fills and not _parse_errors:
             log.debug("All %d fill(s) already processed", len(fills))
             return
 
-        log.info(
-            "%d new fill(s) after dedup (of %d received)",
-            len(new_fills), len(fills),
-        )
+        if new_fills:
+            log.info(
+                "%d new fill(s) after dedup (of %d received)",
+                len(new_fills), len(fills),
+            )
 
         trades = aggregate_fills(new_fills)
-        if not trades:
-            return
 
         fx_errors: list[str] = []
-        trades = enrich_if_enabled(trades, fx_errors)
+        if trades:
+            trades = enrich_if_enabled(trades, fx_errors)
+            for trade in trades:
+                log.info(
+                    "Listener trade: %s %s orderId=%s @ %s (vol %s, %d fill(s))",
+                    trade.side.value, trade.symbol, trade.orderId,
+                    trade.price, trade.volume, trade.fillCount,
+                )
 
-        for trade in trades:
-            log.info(
-                "Listener trade: %s %s orderId=%s @ %s (vol %s, %d fill(s))",
-                trade.side.value, trade.symbol, trade.orderId,
-                trade.price, trade.volume, trade.fillCount,
-            )
+        all_errors = _parse_errors + fx_errors
 
         # Mark-after-notify: notify then mark (never reversed).
         # If notify raises NotificationError, mark is skipped.
-        payload = WebhookPayloadTrades(relay=relay_name, data=trades, errors=fx_errors)
+        payload = WebhookPayloadTrades(relay=relay_name, data=trades, errors=all_errors)
         notify(
             relay.notifiers, payload,
             retries=relay.notify_retries,
@@ -172,9 +183,10 @@ def _send_and_mark(
         )
 
         # Mark processed AFTER notify (relay-prefixed keys)
-        prefixed_new = [f"{relay_name}:{eid}" for t in trades for eid in t.execIds]
-        mark_processed_batch(conn, prefixed_new)
-        log.info("Marked %d fill(s) as processed", len(prefixed_new))
+        if trades:
+            prefixed_new = [f"{relay_name}:{eid}" for t in trades for eid in t.execIds]
+            mark_processed_batch(conn, prefixed_new)
+            log.info("Marked %d fill(s) as processed", len(prefixed_new))
     finally:
         conn.close()
 
@@ -182,6 +194,7 @@ def _send_and_mark(
 def _send_no_mark(
     relay_name: RelayName,
     fills: list[Fill],
+    parse_errors: list[str] | None = None,
 ) -> None:
     """Aggregate and notify WITHOUT dedup or marking.
 
@@ -189,21 +202,25 @@ def _send_no_mark(
     Resolves notifiers and retry config from the relay context.
     """
     relay = get_relay(relay_name)
+    _parse_errors = parse_errors or []
     trades = aggregate_fills(fills)
-    if not trades:
-        return
 
     fx_errors: list[str] = []
-    trades = enrich_if_enabled(trades, fx_errors)
+    if trades:
+        trades = enrich_if_enabled(trades, fx_errors)
+        for trade in trades:
+            log.info(
+                "Listener preliminary: %s %s orderId=%s @ %s (no commission)",
+                trade.side.value, trade.symbol, trade.orderId, trade.price,
+            )
 
-    for trade in trades:
-        log.info(
-            "Listener preliminary: %s %s orderId=%s @ %s (no commission)",
-            trade.side.value, trade.symbol, trade.orderId, trade.price,
-        )
+    all_errors = _parse_errors + fx_errors
+    if not trades and not all_errors:
+        return
+
     notify(
         relay.notifiers,
-        WebhookPayloadTrades(relay=relay_name, data=trades, errors=fx_errors),
+        WebhookPayloadTrades(relay=relay_name, data=trades, errors=all_errors),
         retries=relay.notify_retries,
         retry_delay_ms=relay.notify_retry_delay_ms,
     )
@@ -228,6 +245,7 @@ class DebounceBuffer:
         self._debounce_s = debounce_ms / 1000.0
         self._db_path = db_path
         self._buffer: list[Fill] = []
+        self._parse_errors: list[str] = []
         self._flush_task: asyncio.Task[None] | None = None
         self._flushing = False
 
@@ -243,32 +261,40 @@ class DebounceBuffer:
             self._flush_task.cancel()
         self._flush_task = asyncio.create_task(self._delayed_flush())
 
+    def extend_errors(self, errors: list[str]) -> None:
+        """Accumulate parse errors to be flushed with the next batch of fills."""
+        self._parse_errors.extend(errors)
+
     async def _delayed_flush(self) -> None:
         await asyncio.sleep(self._debounce_s)
         await self.flush()
 
     async def flush(self) -> None:
-        """Flush all buffered fills — safe to call even if empty."""
-        if not self._buffer:
+        """Flush all buffered fills and errors — safe to call even if empty."""
+        if not self._buffer and not self._parse_errors:
             return
         self._flushing = True
         fills = self._buffer.copy()
+        parse_errors = self._parse_errors.copy()
         self._buffer.clear()
+        self._parse_errors.clear()
         try:
             await asyncio.to_thread(
                 _send_and_mark, self._relay_name, fills,
-                self._db_path,
+                self._db_path, parse_errors,
             )
         except asyncio.CancelledError:
             log.warning(
                 "Flush cancelled — restoring %d fill(s) to buffer", len(fills),
             )
             self._buffer = fills + self._buffer
+            self._parse_errors = parse_errors + self._parse_errors
             raise
         except Exception:
             log.exception("Failed to dispatch %d buffered fill(s)", len(fills))
             # Re-add to front so they are retried on next flush
             self._buffer = fills + self._buffer
+            self._parse_errors = parse_errors + self._parse_errors
         finally:
             self._flushing = False
 
@@ -303,9 +329,13 @@ async def _handle_event(
 
     mark_fills: list[Fill] = []
     no_mark_fills: list[Fill] = []
+    parse_errors: list[str] = []
 
     for result in results:
         if result.fill is None:
+            if result.error:
+                log.error("[%s] Skipped fill: %s", relay_name, result.error)
+                parse_errors.append(result.error)
             continue
         fill = result.fill
         if result.mark:
@@ -325,16 +355,26 @@ async def _handle_event(
         if debounce_buf is not None:
             for fill in mark_fills:
                 await debounce_buf.add(fill)
+            if parse_errors:
+                debounce_buf.extend_errors(parse_errors)
         else:
             try:
                 await asyncio.to_thread(
-                    _send_and_mark, relay_name, mark_fills, db_path,
+                    _send_and_mark, relay_name, mark_fills, db_path, parse_errors,
                 )
             except Exception:
                 log.exception(
                     "[%s] Failed to dispatch %d fill(s)",
                     relay_name, len(mark_fills),
                 )
+    elif parse_errors:
+        # No valid fills — send errors immediately (don't wait for debounce).
+        try:
+            await asyncio.to_thread(
+                _send_and_mark, relay_name, [], db_path, parse_errors,
+            )
+        except Exception:
+            log.exception("[%s] Failed to dispatch parse errors", relay_name)
 
     if no_mark_fills:
         try:

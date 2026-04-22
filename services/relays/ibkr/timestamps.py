@@ -3,12 +3,13 @@
 Two native formats arrive from IBKR:
 
 * **Flex XML** (``dateTime`` attribute): ``YYYYMMDD;HHMMSS`` e.g. ``20250403;153000``
-* **ib_async bridge** (``Execution.time``): ``YYYYMMDD-HH:MM:SS`` e.g. ``20260411-10:30:00``
+* **ib_async bridge** (``Execution.time``): ISO-8601 e.g. ``2026-04-22T15:31:28+00:00``
 
-Both are naive (no timezone). Each function here turns one of them into a
-naive ISO-8601 string the shared :func:`shared.normalize_timestamp` layer
-can finish — applying ``IBKR_ACCOUNT_TIMEZONE`` and producing the
-canonical UTC form.
+Flex timestamps are naive. Bridge timestamps may carry a UTC offset when
+ib_async returns a timezone-aware ``datetime``. Each function here turns one
+format into an ISO-8601 string (possibly tz-aware) that the shared
+:func:`shared.normalize_timestamp` layer can finish — converting to canonical
+UTC and applying ``IBKR_ACCOUNT_TIMEZONE`` for naive inputs.
 
 Having the format knowledge here (rather than in ``shared/time_format.py``)
 keeps ``time_format`` broker-agnostic — every new relay's quirks stay in
@@ -33,14 +34,32 @@ def flex_to_iso(raw: str) -> str:
 
 
 def bridge_to_iso(raw: str) -> str:
-    """Convert an ib_async bridge ``Execution.time`` to naive ISO-8601.
+    """Convert an ib_async bridge ``Execution.time`` to ISO-8601.
 
-    Raises ``ValueError`` when *raw* does not match the expected form.
+    Accepts two formats:
+
+    * **ISO-8601** (current): ``YYYY-MM-DDTHH:MM:SS[±HH:MM]`` — passed through
+      as-is so ``normalize_timestamp`` handles timezone conversion downstream.
+    * **Legacy** ``YYYYMMDD-HH:MM:SS`` — converted to naive ISO-8601.
+
+    Raises ``ValueError`` when *raw* is empty or matches neither form.
     """
+    if not raw:
+        raise ValueError("Not a valid IBKR bridge time: empty string")
+    # Distinguish by structure: ISO-8601 has a '-' at position 4 (YYYY-…),
+    # while the legacy format starts with 8 compact digits (YYYYMMDD…).
+    if len(raw) > 4 and raw[4] == "-":
+        try:
+            datetime.fromisoformat(raw)
+            return raw
+        except ValueError as exc:
+            raise ValueError(
+                f"Not a valid IBKR bridge time (expected ISO-8601): {raw!r}"
+            ) from exc
     try:
         dt = datetime.strptime(raw, "%Y%m%d-%H:%M:%S")
+        return dt.isoformat(timespec="seconds")
     except ValueError as exc:
         raise ValueError(
-            f"Not a valid IBKR bridge time (expected YYYYMMDD-HH:MM:SS): {raw!r}"
+            f"Not a valid IBKR bridge time (expected ISO-8601 or YYYYMMDD-HH:MM:SS): {raw!r}"
         ) from exc
-    return dt.isoformat(timespec="seconds")

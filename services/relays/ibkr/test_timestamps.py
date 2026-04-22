@@ -40,24 +40,43 @@ class TestFlexToIso(unittest.TestCase):
 
 class TestBridgeToIso(unittest.TestCase):
 
-    def test_basic(self) -> None:
+    def test_naive_iso(self) -> None:
+        assert bridge_to_iso("2026-04-22T15:31:28") == "2026-04-22T15:31:28"
+
+    def test_utc_aware_iso(self) -> None:
+        assert bridge_to_iso("2026-04-22T15:31:28+00:00") == "2026-04-22T15:31:28+00:00"
+
+    def test_non_utc_offset_passed_through(self) -> None:
+        assert bridge_to_iso("2026-04-22T15:31:28+05:30") == "2026-04-22T15:31:28+05:30"
+
+    def test_z_suffix_passed_through(self) -> None:
+        assert bridge_to_iso("2026-04-22T15:31:28Z") == "2026-04-22T15:31:28Z"
+
+    def test_iso_midnight(self) -> None:
+        assert bridge_to_iso("2026-04-11T00:00:00") == "2026-04-11T00:00:00"
+
+    def test_iso_invalid_date_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            bridge_to_iso("2026-13-01T10:00:00")  # month 13
+
+    def test_legacy_basic(self) -> None:
         assert bridge_to_iso("20260411-10:30:00") == "2026-04-11T10:30:00"
 
-    def test_midnight(self) -> None:
+    def test_legacy_midnight(self) -> None:
         assert bridge_to_iso("20260411-00:00:00") == "2026-04-11T00:00:00"
-
-    def test_semicolon_not_dash_raises(self) -> None:
-        with self.assertRaises(ValueError):
-            bridge_to_iso("20260411;103000")
 
     def test_empty_raises(self) -> None:
         with self.assertRaises(ValueError):
             bridge_to_iso("")
 
-    def test_iso_input_raises(self) -> None:
+    def test_flex_format_raises(self) -> None:
         with self.assertRaises(ValueError):
-            bridge_to_iso("2026-04-11T10:30:00")
+            bridge_to_iso("20260411;103000")
 
-    def test_invalid_time_raises(self) -> None:
+    def test_legacy_invalid_hour_raises(self) -> None:
         with self.assertRaises(ValueError):
-            bridge_to_iso("20260411-25:30:00")  # hour 25
+            bridge_to_iso("20260411-25:30:00")
+
+    def test_garbage_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            bridge_to_iso("not-a-timestamp")

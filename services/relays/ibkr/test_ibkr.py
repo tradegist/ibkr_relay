@@ -248,14 +248,17 @@ class TestMapFill(unittest.TestCase):
         assert fill is not None
         self.assertEqual(fill.side, BuySell.SELL)
 
-    def test_unknown_side_returns_none(self) -> None:
-        self.assertIsNone(_map_fill(_make_envelope(side="UNKNOWN"), _TEST_TZ))
+    def test_unknown_side_raises(self) -> None:
+        with self.assertRaises(ValueError, msg="Unknown execution side"):
+            _map_fill(_make_envelope(side="UNKNOWN"), _TEST_TZ)
 
-    def test_no_fill_returns_none(self) -> None:
-        self.assertIsNone(_map_fill(_make_envelope(has_fill=False), _TEST_TZ))
+    def test_no_fill_raises(self) -> None:
+        with self.assertRaises(ValueError, msg="has no fill data"):
+            _map_fill(_make_envelope(has_fill=False), _TEST_TZ)
 
-    def test_empty_exec_id_returns_none(self) -> None:
-        self.assertIsNone(_map_fill(_make_envelope(exec_id=""), _TEST_TZ))
+    def test_empty_exec_id_raises(self) -> None:
+        with self.assertRaises(ValueError, msg="Empty execId"):
+            _map_fill(_make_envelope(exec_id=""), _TEST_TZ)
 
     def test_fee_is_positive(self) -> None:
         fill = _map_fill(_make_envelope(), _TEST_TZ)
@@ -276,11 +279,12 @@ class TestMapFill(unittest.TestCase):
         # 10:30 NY in April (EDT, -04:00) → UTC 14:30
         self.assertEqual(fill.timestamp, "2026-04-11T14:30:00")
 
-    def test_bad_timestamp_returns_none(self) -> None:
+    def test_bad_timestamp_raises(self) -> None:
         bad_envelope = _make_envelope()
         assert bad_envelope.fill is not None
         bad_envelope.fill.execution.time = "not-a-timestamp"
-        self.assertIsNone(_map_fill(bad_envelope, _TEST_TZ))
+        with self.assertRaises(ValueError, msg="Bad execution time"):
+            _map_fill(bad_envelope, _TEST_TZ)
 
 
 # ── on_message dispatch tests ───────────────────────────────────────
@@ -323,13 +327,17 @@ class TestOnMessage(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(results, [])
 
-    async def test_invalid_envelope_skipped(self) -> None:
+    async def test_invalid_envelope_returns_error_result(self) -> None:
         handler = _on_message_factory(exec_events_enabled=True, tz=_TEST_TZ)
         data: dict[str, Any] = {"type": "commissionReportEvent", "bad": "data"}
 
         results = await handler(data)
 
-        self.assertEqual(results, [])
+        self.assertEqual(len(results), 1)
+        self.assertIsNone(results[0].fill)
+        self.assertIsNotNone(results[0].error)
+        assert results[0].error is not None
+        self.assertIn("commissionReportEvent", results[0].error)
 
 
 # ── Poller config tests ──────────────────────────────────────────────
