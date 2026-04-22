@@ -100,23 +100,27 @@ def _deploy_standalone():
 
 
 def _template_caddy_snippet(src: Path) -> str:
-    """Replace Caddy {$VAR} placeholders with env var values.
+    """Replace Caddy {$VAR} and {$VAR:-default} placeholders with env var values.
 
-    Finds all ``{$NAME}`` patterns in the file and substitutes them
-    with the corresponding environment variable. Raises if any
-    referenced env var is not set.
+    Substitutes each ``{$NAME}`` with the corresponding environment variable.
+    ``{$NAME:-default}`` uses the default when the env var is unset or empty.
+    Raises if any required var (no default) is not set.
     """
     content = src.read_text()
-    refs = re.findall(r'\{\$([A-Z_][A-Z0-9_]*)\}', content)
+    pattern = re.compile(r'\{\$([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}')
+    refs = pattern.findall(content)
     if not refs:
         return content
-    missing = [name for name in refs if not os.environ.get(name)]
+    missing = [name for name, default in refs if not default and not os.environ.get(name)]
     if missing:
         die(f"Caddy snippet {src.name} references undefined env vars: "
             f"{', '.join(missing)}\nSet them in .env before deploying.")
-    for name in refs:
-        content = content.replace(f"{{${name}}}", os.environ[name])
-    return content
+
+    def _sub(m: re.Match) -> str:
+        name, default = m.group(1), m.group(2) or ""
+        return os.environ.get(name) or default
+
+    return pattern.sub(_sub, content)
 
 
 def _validate_site_snippet_routes(content: str, snippet_name: str, prefix: str) -> None:
@@ -166,7 +170,9 @@ def _deploy_caddy_snippets(droplet_ip: str) -> None:
     if deployed:
         print("Reloading Caddy configuration...")
         ssh_cmd(droplet_ip,
-                "docker exec caddy caddy reload --config /etc/caddy/Caddyfile")
+                "docker exec "
+                "$(docker ps --filter label=com.docker.compose.service=caddy --format '{{.Names}}' | head -1) "
+                "caddy reload --config /etc/caddy/Caddyfile")
 
 
 def _deploy_shared():
