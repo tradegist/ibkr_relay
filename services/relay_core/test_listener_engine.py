@@ -396,6 +396,88 @@ class TestSendNoMark(unittest.TestCase):
         self.assertEqual(payload.data, [])
 
 
+# ── Notifier-dispatch ordering contract ─────────────────────────────
+
+
+class TestDispatchOrdering(unittest.TestCase):
+    """Trades reach notify() sorted by timestamp ascending.
+
+    Sorted at each call site (not inside aggregate_fills), so verified
+    independently for both _send_and_mark and _send_no_mark.
+    """
+
+    @staticmethod
+    def _fill(exec_id: str, order_id: str, timestamp: str) -> Fill:
+        return Fill(
+            execId=exec_id,
+            orderId=order_id,
+            symbol="X",
+            assetClass="equity",
+            side=BuySell.BUY,
+            orderType=None,
+            price=100.0,
+            volume=1.0,
+            cost=100.0,
+            fee=0.0,
+            timestamp=timestamp,
+            source="commissionReportEvent",
+            raw={},
+        )
+
+    @patch("relay_core.listener_engine.mark_processed_batch")
+    @patch("relay_core.listener_engine.notify")
+    @patch("relay_core.listener_engine.get_processed_ids", return_value=set())
+    @patch("relay_core.listener_engine._init_dedup_db")
+    def test_send_and_mark_sorts_trades_by_timestamp_ascending(
+        self,
+        mock_init_db: MagicMock,
+        mock_get_ids: MagicMock,
+        mock_notify: MagicMock,
+        mock_mark: MagicMock,
+    ) -> None:
+        mock_init_db.return_value = MagicMock()
+
+        f_late = self._fill("L", "O_LATE", "2026-04-22T09:28:31")
+        f_early = self._fill("E", "O_EARLY", "2026-03-27T13:44:55")
+        f_mid = self._fill("M", "O_MID", "2026-04-06T09:47:31")
+
+        _send_and_mark("ibkr", [f_late, f_early, f_mid], "/tmp/test.db")
+
+        mock_notify.assert_called_once()
+        payload = mock_notify.call_args[0][1]
+        timestamps = [t.timestamp for t in payload.data]
+        self.assertEqual(
+            timestamps,
+            [
+                "2026-03-27T13:44:55",
+                "2026-04-06T09:47:31",
+                "2026-04-22T09:28:31",
+            ],
+        )
+
+    @patch("relay_core.listener_engine.notify")
+    def test_send_no_mark_sorts_trades_by_timestamp_ascending(
+        self, mock_notify: MagicMock,
+    ) -> None:
+        f_late = self._fill("L", "O_LATE", "2026-04-22T09:28:31")
+        f_early = self._fill("E", "O_EARLY", "2026-03-27T13:44:55")
+        f_mid = self._fill("M", "O_MID", "2026-04-06T09:47:31")
+
+        _send_no_mark("ibkr", [f_late, f_early, f_mid])
+
+        mock_notify.assert_called_once()
+        payload = mock_notify.call_args[0][1]
+        timestamps = [t.timestamp for t in payload.data]
+        self.assertEqual(
+            timestamps,
+            [
+                "2026-03-27T13:44:55",
+                "2026-04-06T09:47:31",
+                "2026-04-22T09:28:31",
+            ],
+        )
+
+
 # ── _handle_event tests ─────────────────────────────────────────────
 
 

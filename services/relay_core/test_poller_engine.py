@@ -558,3 +558,69 @@ class TestPollOnce:
         assert get_last_poll_ts(meta_db, "ibkr", poller_index=0) == to_epoch("2025-04-03T12:00:00")
         # Index 1 watermark now reflects what it processed
         assert get_last_poll_ts(meta_db, "ibkr", poller_index=1) == to_epoch("2025-04-03T10:00:00")
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  Notifier-dispatch ordering contract
+# ═════════════════════════════════════════════════════════════════════
+
+class TestDispatchOrdering:
+    """Trades reach notify() sorted by timestamp ascending.
+
+    The sort is performed at each ``notify()`` call site (not inside
+    aggregate_fills), so this contract must be verified independently
+    for the normal poll path and the replay path.
+    """
+
+    @patch("relay_core.poller_engine.notify")
+    def test_normal_poll_sorts_trades_by_timestamp_ascending(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        # Three orders fed in deliberately scrambled order — mirrors how
+        # IBKR Flex groups by symbol rather than by time.
+        f_late = _make_fill(execId="L", orderId="O_LATE", symbol="MSTR",
+                            timestamp="2026-04-22T09:28:31")
+        f_early = _make_fill(execId="E", orderId="O_EARLY", symbol="ALAB",
+                             timestamp="2026-03-27T13:44:55")
+        f_mid = _make_fill(execId="M", orderId="O_MID", symbol="CRCL",
+                           timestamp="2026-04-06T09:47:31")
+
+        cfg = _MockPollerConfig(parse=lambda _: ([f_late, f_early, f_mid], []))
+        _set_poller(cfg)
+        poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+
+        sent_payload = mock_notify.call_args[0][1]
+        timestamps = [t.timestamp for t in sent_payload.data]
+        assert timestamps == [
+            "2026-03-27T13:44:55",
+            "2026-04-06T09:47:31",
+            "2026-04-22T09:28:31",
+        ]
+
+    @patch("relay_core.poller_engine.notify")
+    def test_replay_path_sorts_trades_by_timestamp_ascending(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        # All fills are pre-marked so the normal path produces zero new fills,
+        # forcing the replay branch.
+        f_late = _make_fill(execId="L", orderId="O_LATE", symbol="MSTR",
+                            timestamp="2026-04-22T09:28:31")
+        f_early = _make_fill(execId="E", orderId="O_EARLY", symbol="ALAB",
+                             timestamp="2026-03-27T13:44:55")
+        f_mid = _make_fill(execId="M", orderId="O_MID", symbol="CRCL",
+                           timestamp="2026-04-06T09:47:31")
+        mark_processed_batch(dedup_db, ["ibkr:L", "ibkr:E", "ibkr:M"])
+
+        cfg = _MockPollerConfig(parse=lambda _: ([f_late, f_early, f_mid], []))
+        _set_poller(cfg)
+        poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db, replay=3)
+
+        sent_payload = mock_notify.call_args[0][1]
+        timestamps = [t.timestamp for t in sent_payload.data]
+        assert timestamps == [
+            "2026-03-27T13:44:55",
+            "2026-04-06T09:47:31",
+            "2026-04-22T09:28:31",
+        ]

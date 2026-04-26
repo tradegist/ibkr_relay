@@ -254,6 +254,9 @@ def poll_once(
                     "Replay mode: resending %d fill(s) as %d trade(s)",
                     len(replay_fills), len(trades),
                 )
+                # Notifier-dispatch contract: chronological order regardless
+                # of source grouping (e.g. IBKR Flex groups by symbol).
+                trades.sort(key=lambda t: t.timestamp)
                 notify(
                     notifiers,
                     WebhookPayloadTrades(relay=relay_name, data=trades, errors=parse_errors),
@@ -275,6 +278,10 @@ def poll_once(
                 trade.side, trade.symbol, trade.orderId,
                 trade.price, trade.volume, trade.fillCount,
             )
+
+        # Notifier-dispatch contract: chronological order regardless of
+        # source grouping (e.g. IBKR Flex groups by symbol).
+        trades.sort(key=lambda t: t.timestamp)
 
         # Send a single webhook with all trades
         notify(

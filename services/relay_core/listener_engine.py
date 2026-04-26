@@ -173,6 +173,10 @@ def _send_and_mark(
 
         all_errors = _parse_errors + fx_errors
 
+        # Notifier-dispatch contract: chronological order regardless of the
+        # order events arrived in (debounce buffering can shuffle ordering).
+        trades.sort(key=lambda t: t.timestamp)
+
         # Mark-after-notify: notify then mark (never reversed).
         # If notify raises NotificationError, mark is skipped.
         payload = WebhookPayloadTrades(relay=relay_name, data=trades, errors=all_errors)
@@ -217,6 +221,9 @@ def _send_no_mark(
     all_errors = _parse_errors + fx_errors
     if not trades and not all_errors:
         return
+
+    # Notifier-dispatch contract: chronological order regardless of source order.
+    trades.sort(key=lambda t: t.timestamp)
 
     notify(
         relay.notifiers,
