@@ -190,6 +190,7 @@ Use the existing `ibkr` and `kraken` relays as reference implementations. IBKR d
    - Use `relay_core.env.get_env()` / `get_env_int()` for vars that support prefix fallback.
    - Use direct `os.environ.get()` wrapped in getter functions for broker-specific vars with no generic equivalent.
    - Add the vars to `env_examples/env.relays` (the template file) — this is **mandatory**. Follow the existing relay sections as a model: uncomment required vars, comment out optional ones with their defaults. Document in the README.
+   - Update the `RELAYS` comment in `env_examples/env` to include the new relay name in the "Available relays" list.
 
 5. **Register the module**:
    - `pyproject.toml`: add to `tool.pytest.ini_options.testpaths`, `tool.ruff.src`, `tool.ruff.lint.isort.known-first-party`.
@@ -447,7 +448,7 @@ ts = normalize_timestamp(raw)                               # Kraken (already IS
 
 - Each broker's format is documented and tested next to the code that produces it.
 - `shared/time_format.py` stays tiny and broker-agnostic.
-- `datetime.fromisoformat` in Python 3.12+ is *very* lenient (it accepts IBKR-style `YYYYMMDD-HH:MM:SS` and `YYYYMMDD;HHMMSS` directly). The relay-level helper exists specifically to **reject typos and wrong separators** that `fromisoformat` would silently misinterpret — it's a validation gate, not a parsing fallback.
+- `datetime.fromisoformat` in Python 3.12+ is _very_ lenient (it accepts IBKR-style `YYYYMMDD-HH:MM:SS` and `YYYYMMDD;HHMMSS` directly). The relay-level helper exists specifically to **reject typos and wrong separators** that `fromisoformat` would silently misinterpret — it's a validation gate, not a parsing fallback.
 
 **Timezone handling.** Brokers that emit naive timestamps (IBKR Flex, IBKR bridge) need a `{RELAY}_ACCOUNT_TIMEZONE` env var (e.g. `IBKR_ACCOUNT_TIMEZONE=America/New_York`). Read it via a getter that calls `shared.parse_timezone(name)` and converts `ValueError` to `SystemExit` at boot. The resulting `ZoneInfo` is threaded into parse callbacks via `build_relay()` (closure-capture, not re-read per fill). Brokers that emit tz-aware timestamps (Kraken with `Z`) don't need an env var — `normalize_timestamp` ignores `assume_tz` when the input is tz-aware.
 
@@ -516,11 +517,11 @@ services/relay_core/dedup/
 
 This project has **three model locations** — each owns a distinct contract layer:
 
-| File                                          | Domain                      | Contains                                                                    |
-| --------------------------------------------- | --------------------------- | --------------------------------------------------------------------------- |
-| `services/shared/models.py`                   | CommonFill primitives       | `Fill`, `Trade`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `RelayName` |
-| `services/relay_core/notifier/models.py`      | Notifier payload (outbound) | `WebhookPayloadTrades`, `WebhookPayload`                                     |
-| `services/relay_core/relay_models.py`         | Relay API (outbound)        | Re-exports notifier payload + `RunPollResponse`, `HealthResponse`            |
+| File                                     | Domain                      | Contains                                                                     |
+| ---------------------------------------- | --------------------------- | ---------------------------------------------------------------------------- |
+| `services/shared/models.py`              | CommonFill primitives       | `Fill`, `Trade`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `RelayName` |
+| `services/relay_core/notifier/models.py` | Notifier payload (outbound) | `WebhookPayloadTrades`, `WebhookPayload`                                     |
+| `services/relay_core/relay_models.py`    | Relay API (outbound)        | Re-exports notifier payload + `RunPollResponse`, `HealthResponse`            |
 
 - **`services/shared/models.py`** defines the CommonFill primitives. The `__init__.py` barrel re-exports them so `from shared import Fill` keeps working.
 - **`services/relay_core/notifier/models.py`** is the authoritative home for outbound webhook payload contracts. When you want to know "what does the notifier send?", this is where to look. Add new payload variants here as new event types are introduced.

@@ -37,7 +37,7 @@ WEBHOOK_SECRET=your_hmac_secret_key
 
 # ── Relays ────────────────────────────────────────────────────────────
 
-# Comma-separated list of relay adapters to activate (e.g. "ibkr").
+# Comma-separated list of relay adapters to activate. Available relays: "ibkr", "kraken".
 RELAYS=ibkr
 
 # Set to false to disable the poller globally (relay-specific override: {RELAY}_POLLER_ENABLED).

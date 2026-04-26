@@ -412,8 +412,9 @@ Before deploying, create an Activity Flex Query in IBKR Client Portal:
 4. Set **Period** to **Last 7 Days** (covers missed fills if the droplet was down)
 5. In **Sections**, enable **Trades** and select the execution fields you want
 6. Set **Format** to **XML**
-7. Save and note the **Query ID** (use as `IBKR_FLEX_QUERY_ID` in `.env.relays`)
-8. Go to **Flex Web Service Configuration** → enable and get the **Current Token** (use as `IBKR_FLEX_TOKEN` in `.env.relays`)
+7. Set the **Date Format** to **`yyyyMMdd`**, the **Time Format** to **`HHmmss`**, and the **Date/Time Separator** to **`;` (semi-colon)** — these are the only values the parser supports. Any other combination will cause fill rows to be skipped with a timestamp parse error.
+8. Save and note the **Query ID** (use as `IBKR_FLEX_QUERY_ID` in `.env.relays`)
+9. Go to **Flex Web Service Configuration** → enable and get the **Current Token** (use as `IBKR_FLEX_TOKEN` in `.env.relays`)
 
 ### IBKR polling (Flex Web Service)
 
