@@ -8,6 +8,7 @@ For deployment and user-facing documentation, see the [README](README.md).
 
 - [Commands](#commands)
 - [Testing](#testing)
+- [Debug Webhook Inbox](#debug-webhook-inbox)
 - [IBKR Fixtures](#ibkr-fixtures)
 - [TypeScript Types](#typescript-types)
 - [Python Types](#python-types)
@@ -184,6 +185,86 @@ make sync ENV=local          # explicit: restart local stack
 ```
 
 `make local-up` is only needed for the initial build or after changing `requirements.txt` / Dockerfile.
+
+## Debug Webhook Inbox
+
+The `debug` service is a lightweight HTTP inbox that captures webhook payloads for inspection. It is disabled by default and enabled by setting `DEBUG_WEBHOOK_PATH` in `.env`.
+
+### Enabling
+
+Add to `.env`:
+
+```env
+DEBUG_WEBHOOK_PATH=my-secret-path
+```
+
+Then restart the stack:
+
+```bash
+make sync ENV=local    # local stack
+make sync              # production droplet
+```
+
+The container only starts when `DEBUG_WEBHOOK_PATH` is non-empty. When the webhook notifier has `DEBUG_WEBHOOK_PATH` set, it automatically routes to `http://debug:9000/debug/webhook/{path}` instead of the production `TARGET_WEBHOOK_URL`.
+
+### API
+
+All endpoints are at `/debug/webhook/{path}` where `{path}` must match `DEBUG_WEBHOOK_PATH`. Requests to any other path return 404. **There is no auth header** — the path segment itself acts as the shared secret.
+
+| Method   | Endpoint                    | Description                          |
+| -------- | --------------------------- | ------------------------------------ |
+| `POST`   | `/debug/webhook/{path}`     | Capture a payload (called by notifier) |
+| `GET`    | `/debug/webhook/{path}`     | Return all stored payloads           |
+| `DELETE` | `/debug/webhook/{path}`     | Clear the inbox                      |
+
+### Viewing and clearing payloads
+
+**Local stack (port 15003):**
+
+```bash
+# Fetch all stored payloads
+curl http://localhost:15003/debug/webhook/my-secret-path
+
+# Clear the inbox
+curl -X DELETE http://localhost:15003/debug/webhook/my-secret-path
+```
+
+**Production (via Caddy):**
+
+```bash
+curl https://trade.example.com/debug/webhook/my-secret-path
+curl -X DELETE https://trade.example.com/debug/webhook/my-secret-path
+```
+
+The `GET` response shape:
+
+```json
+{
+  "count": 1,
+  "payloads": [
+    {
+      "received_at": "2025-01-01T12:00:00+00:00",
+      "headers": { "Content-Type": "application/json", "X-Signature-256": "sha256=..." },
+      "payload": { "event": "trades", "trades": [ ... ] }
+    }
+  ]
+}
+```
+
+### Inbox capacity
+
+Payloads are stored **in memory only** — they are lost on container restart. The inbox holds up to `MAX_DEBUG_WEBHOOK_PAYLOADS` entries (default 100, hard max 150). When full, the oldest entry is evicted on each new `POST`.
+
+### Verbose logging
+
+Set `DEBUG_LOG_LEVEL=DEBUG` in `.env` to include full payloads and headers in container logs:
+
+```bash
+make logs S=debug ENV=local    # local stack
+make logs S=debug              # production droplet
+```
+
+At `INFO` level only a summary line is logged (`Captured webhook payload (N/100 stored)`). At `DEBUG` level the full payload and headers are included.
 
 ## IBKR Fixtures
 
