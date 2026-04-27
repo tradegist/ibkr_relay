@@ -224,13 +224,15 @@ def _map_fill(envelope: WsEnvelope, tz: ZoneInfo) -> Fill:
 
     # symbol / option resolution.  ib_async populates Contract.symbol with
     # the underlying ticker for every secType (so for OPT it's e.g. "TSLA",
-    # not the option contract).  The OCC option ticker
-    # (e.g. "TSLA  281215C00350000") lives on Contract.localSymbol.
+    # not the option contract).  The OCC option ticker lives on
+    # Contract.localSymbol — IBKR pads the underlying to 6 chars with spaces
+    # (e.g. "TSLA  281215C00350000"). Spaces are stripped so the symbol is
+    # URL-friendly (e.g. "TSLA281215C00350000").
     # Mirror Flex's convention: Fill.symbol = full instrument identifier,
     # Fill.option = nested OptionContract for derivatives, None otherwise.
     option: OptionContract | None
     if asset_class == "option":
-        symbol = contract.localSymbol.strip()
+        symbol = contract.localSymbol.strip().replace(" ", "")
         if not symbol:
             raise ValueError(
                 f"Empty localSymbol for option execId={exec_id!r}"

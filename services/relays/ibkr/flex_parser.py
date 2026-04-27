@@ -271,10 +271,14 @@ def parse_fills(
                 ts = ""
 
             try:
+                # IBKR pads the underlying ticker to 6 chars with spaces in
+                # the OCC symbol (e.g. "AVGO  260508C00375000"). Strip them so
+                # Fill.symbol is URL-friendly ("AVGO260508C00375000").
+                raw_symbol = str(raw.get("symbol", ""))
                 fill = Fill(
                     execId=exec_id,
                     orderId=str(raw.get("orderId", "")),
-                    symbol=str(raw.get("symbol", "")),
+                    symbol=raw_symbol.replace(" ", "") if asset_class == "option" else raw_symbol,
                     assetClass=asset_class,
                     side=side,
                     orderType=normalize_order_type(str(raw.get("orderType", ""))),

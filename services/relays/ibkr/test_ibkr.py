@@ -333,15 +333,16 @@ class TestOptionMapFill(unittest.TestCase):
     ``symbol`` is the underlying ticker (e.g. ``"AVGO"``) and
     ``localSymbol`` is the OCC option ticker (e.g.
     ``"AVGO  260508C00375000"``).  The relay surfaces ``localSymbol`` as
-    ``Fill.symbol`` (matching the Flex convention) and packs the option
-    metadata — including the underlying — into ``Fill.option``.
+    ``Fill.symbol`` with spaces stripped for URL-friendliness (e.g.
+    ``"AVGO260508C00375000"``) and packs the option metadata — including
+    the underlying — into ``Fill.option``.
     """
 
     # ── happy path ───────────────────────────────────────────────────
 
     def test_option_fill_uses_local_symbol_for_symbol(self) -> None:
         fill = _map_fill(_envelope_with_contract(_option_contract()), _TEST_TZ)
-        self.assertEqual(fill.symbol, "AVGO  260508C00375000")
+        self.assertEqual(fill.symbol, "AVGO260508C00375000")
 
     def test_option_fill_has_full_option_contract(self) -> None:
         fill = _map_fill(_envelope_with_contract(_option_contract()), _TEST_TZ)
