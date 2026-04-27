@@ -319,7 +319,7 @@ The `errors` array contains warnings about parse problems — it is empty when e
 
 ### Option contracts
 
-When `assetClass == "option"`, the `option` object is always present and contains:
+When `assetClass == "option"`, the `option` object is populated (non-null) and contains:
 
 | Field        | Type              | Description                              |
 | ------------ | ----------------- | ---------------------------------------- |
@@ -363,7 +363,7 @@ Example — IBKR option trade (AVGO call, sold via Flex):
 }
 ```
 
-Rows with `assetClass == "option"` where option metadata is missing or invalid are skipped and surfaced in the `errors` array rather than emitted with an incomplete `option` object.
+Rows with `assetClass == "option"` where option metadata is missing or invalid are skipped and surfaced in the `errors` array rather than emitted with an incomplete `option` object. This means any trade that reaches your webhook with `assetClass == "option"` is guaranteed to have a non-null `option` field — the invariant is enforced by the parsers rather than by the type schema (which models `option` as `OptionContract | null` to cover non-option assets).
 
 The payload is signed with HMAC-SHA256. Verify using the `X-Signature-256` header:
 

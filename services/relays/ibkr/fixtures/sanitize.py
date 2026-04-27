@@ -39,6 +39,12 @@ of cutting in the middle of an order's execution stream.
 Idempotent: re-running on an already-sanitized file produces identical
 output (order #1 always maps to ``333333331``, fill row #1 always gets
 ``{n}=1``, etc.).
+
+**Assumption:** the input XML contains only ``<Trades>`` / ``<TradeConfirms>``
+sections (i.e. the Flex query is trade-only).  Per-execution IDs are replaced
+only inside fill elements, so any other section that carries these attributes
+(e.g. ``<CashTransaction transactionID="...">``) would pass through unchanged.
+This sanitizer is not designed for full-account Flex exports.
 """
 
 import re
