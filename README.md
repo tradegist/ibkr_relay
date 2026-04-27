@@ -31,6 +31,7 @@ Currently supports **IBKR** (Interactive Brokers) via the Flex Web Service and *
 - [Architecture](#architecture)
 - [Configuration](#configuration)
 - [Webhook Payload](#webhook-payload)
+  - [Option contracts](#option-contracts)
   - [FX Rate Enrichment](#fx-rate-enrichment)
   - [Debug Webhook Inbox](#debug-webhook-inbox)
 - [IBKR Setup](#ibkr-setup)
@@ -180,36 +181,36 @@ Configuration is split across three environment files. Templates are in `env_exa
 
 ### `.env` — App config
 
-| Variable                            | Required | Default            | Description                                                                                                     |
-| ----------------------------------- | -------- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `SITE_DOMAIN`                       | Yes      | —                  | Domain for the relay API (see [Domains & HTTPS](#domains--https))                                               |
-| `API_TOKEN`                         | Yes      | —                  | Bearer token for `/relays/*` endpoints (`openssl rand -hex 32`)                                                 |
-| `RELAYS`                            | No       | —                  | Comma-separated relay adapters (e.g. `ibkr`, `ibkr,kraken`). Empty = API server only                            |
-| `NOTIFIERS`                         | No       | —                  | Active notification backends (e.g. `webhook`). Empty = dry-run                                                  |
-| `TARGET_WEBHOOK_URL`                | No       | —                  | Webhook endpoint (empty = log-only dry-run)                                                                     |
-| `WEBHOOK_SECRET`                    | No       | —                  | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                            |
-| `POLL_INTERVAL`                     | No       | `600`              | Flex poll interval (seconds)                                                                                    |
-| `POLLER_ENABLED`                    | No       | `true`             | Set to `false` to disable the poller globally (relay override: `{RELAY}_POLLER_ENABLED`)                        |
-| `LISTENER_ENABLED`                  | No       | —                  | Set to `true` to enable real-time WS listeners globally; IBKR requires `ibkr_bridge`, Kraken does not           |
-| `LISTENER_DEBOUNCE_MS`              | No       | `0`                | Milliseconds to buffer fills before flushing                                                                    |
-| `IBKR_LISTENER_EXEC_EVENTS_ENABLED` | No       | `false`            | Enable `execDetailsEvent` webhooks (2x volume, lower latency)                                                   |
-| `DEBUG_WEBHOOK_PATH`                | No       | —                  | Route webhooks to debug inbox instead of `TARGET_WEBHOOK_URL` (see [Debug Webhook Inbox](#debug-webhook-inbox)) |
-| `MAX_DEBUG_WEBHOOK_PAYLOADS`        | No       | `100`              | Max payloads stored in the debug inbox (hard max: 150, FIFO eviction)                                           |
-| `DEBUG_LOG_LEVEL`                   | No       | `INFO`             | Set to `DEBUG` to include full payload+headers in `docker logs debug`                                           |
-| `FX_RATES_ENABLED`                  | No       | `false`            | Attach `fxRate`/`fxRateBase`/`fxRateSource` to each Trade (see [FX Rate Enrichment](#fx-rate-enrichment))       |
-| `FX_RATES_BASE_CURRENCY`            | No\*     | —                  | ISO-4217 base currency (required when `FX_RATES_ENABLED=true`)                                                  |
-| `FX_RATE_API_KEY`                   | No       | —                  | [exchangerate-api.com](https://www.exchangerate-api.com) key — enables historical rates                         |
-| `FX_CACHE_RETENTION_DAYS`           | No       | `730`              | Days to retain cached historical rates in the meta DB                                                           |
+| Variable                            | Required | Default | Description                                                                                                     |
+| ----------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------- |
+| `SITE_DOMAIN`                       | Yes      | —       | Domain for the relay API (see [Domains & HTTPS](#domains--https))                                               |
+| `API_TOKEN`                         | Yes      | —       | Bearer token for `/relays/*` endpoints (`openssl rand -hex 32`)                                                 |
+| `RELAYS`                            | No       | —       | Comma-separated relay adapters (e.g. `ibkr`, `ibkr,kraken`). Empty = API server only                            |
+| `NOTIFIERS`                         | No       | —       | Active notification backends (e.g. `webhook`). Empty = dry-run                                                  |
+| `TARGET_WEBHOOK_URL`                | No       | —       | Webhook endpoint (empty = log-only dry-run)                                                                     |
+| `WEBHOOK_SECRET`                    | No       | —       | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                            |
+| `POLL_INTERVAL`                     | No       | `600`   | Flex poll interval (seconds)                                                                                    |
+| `POLLER_ENABLED`                    | No       | `true`  | Set to `false` to disable the poller globally (relay override: `{RELAY}_POLLER_ENABLED`)                        |
+| `LISTENER_ENABLED`                  | No       | —       | Set to `true` to enable real-time WS listeners globally; IBKR requires `ibkr_bridge`, Kraken does not           |
+| `LISTENER_DEBOUNCE_MS`              | No       | `0`     | Milliseconds to buffer fills before flushing                                                                    |
+| `IBKR_LISTENER_EXEC_EVENTS_ENABLED` | No       | `false` | Enable `execDetailsEvent` webhooks (2x volume, lower latency)                                                   |
+| `DEBUG_WEBHOOK_PATH`                | No       | —       | Route webhooks to debug inbox instead of `TARGET_WEBHOOK_URL` (see [Debug Webhook Inbox](#debug-webhook-inbox)) |
+| `MAX_DEBUG_WEBHOOK_PAYLOADS`        | No       | `100`   | Max payloads stored in the debug inbox (hard max: 150, FIFO eviction)                                           |
+| `DEBUG_LOG_LEVEL`                   | No       | `INFO`  | Set to `DEBUG` to include full payload+headers in `docker logs debug`                                           |
+| `FX_RATES_ENABLED`                  | No       | `false` | Attach `fxRate`/`fxRateBase`/`fxRateSource` to each Trade (see [FX Rate Enrichment](#fx-rate-enrichment))       |
+| `FX_RATES_BASE_CURRENCY`            | No\*     | —       | ISO-4217 base currency (required when `FX_RATES_ENABLED=true`)                                                  |
+| `FX_RATE_API_KEY`                   | No       | —       | [exchangerate-api.com](https://www.exchangerate-api.com) key — enables historical rates                         |
+| `FX_CACHE_RETENTION_DAYS`           | No       | `730`   | Days to retain cached historical rates in the meta DB                                                           |
 
 ### `.env.droplet` — CLI-only (never pushed to containers)
 
-| Variable       | Required | Default               | Description                                                                  |
-| -------------- | -------- | --------------------- | ---------------------------------------------------------------------------- |
-| `DEPLOY_MODE`  | Yes      | —                     | `standalone` (own droplet via Terraform) or `shared` (existing droplet)      |
-| `DO_API_TOKEN` | Yes\*    | —                     | DigitalOcean API token (standalone only — can be removed after first deploy) |
-| `DROPLET_IP`   | Yes\*    | —                     | Droplet IP (from Terraform output in standalone; provided by host in shared) |
+| Variable       | Required | Default            | Description                                                                  |
+| -------------- | -------- | ------------------ | ---------------------------------------------------------------------------- |
+| `DEPLOY_MODE`  | Yes      | —                  | `standalone` (own droplet via Terraform) or `shared` (existing droplet)      |
+| `DO_API_TOKEN` | Yes\*    | —                  | DigitalOcean API token (standalone only — can be removed after first deploy) |
+| `DROPLET_IP`   | Yes\*    | —                  | Droplet IP (from Terraform output in standalone; provided by host in shared) |
 | `SSH_KEY`      | No       | `~/.ssh/relayport` | SSH key path — **shared mode only**. Standalone auto-generates.              |
-| `DROPLET_SIZE` | No       | `s-1vcpu-512mb`       | Override droplet size slug                                                   |
+| `DROPLET_SIZE` | No       | `s-1vcpu-512mb`    | Override droplet size slug                                                   |
 
 ### `.env.relays` — Relay-prefixed vars
 
@@ -290,30 +291,79 @@ The envelope uses a discriminated union pattern — `relay` identifies the broke
 
 All broker adapters use the same **CommonFill** model. The `data` array contains `Trade` objects with these guaranteed fields:
 
-| Field          | Type                | Description                                                                                                                                              |
-| -------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `orderId`      | `string`            | Permanent order identifier (unique per account)                                                                                                          |
-| `symbol`       | `string`            | Instrument symbol                                                                                                                                        |
-| `assetClass`   | `AssetClass`        | `"equity"`, `"option"`, `"crypto"`, `"future"`, `"forex"`, or `"other"`                                                                                  |
-| `side`         | `"buy" \| "sell"`   | Trade direction (lowercase)                                                                                                                              |
-| `orderType`    | `OrderType \| null` | Normalized: `"market"`, `"limit"`, `"stop"`, `"stop_limit"`, `"trailing_stop"`, or `null`                                                                |
-| `price`        | `number`            | VWAP when aggregated, single fill price otherwise                                                                                                        |
-| `volume`       | `number`            | Sum of fill quantities                                                                                                                                   |
-| `cost`         | `number`            | Total cost (sum of fills)                                                                                                                                |
-| `fee`          | `number`            | Total fees/commissions (always positive — amount paid)                                                                                                   |
-| `fillCount`    | `number`            | Number of fills aggregated into this trade                                                                                                               |
-| `execIds`      | `string[]`          | One execution ID per fill (for tracing back to individual fills)                                                                                         |
-| `timestamp`    | `string`            | Latest fill timestamp. Canonical form: `YYYY-MM-DDTHH:MM:SS`, always UTC, no `Z` suffix, no fractional seconds                                           |
-| `source`       | `string`            | Origin: `"flex"` (IBKR Flex poll), `"execDetailsEvent"` / `"commissionReportEvent"` (IBKR WS), `"rest_poll"` (Kraken REST), `"ws_execution"` (Kraken WS) |
-| `currency`     | `string \| null`    | ISO-4217 currency of the asset traded (e.g. `"USD"` for AAPL). `null` when the broker doesn't expose it                                                  |
-| `fxRate`       | `number \| null`    | FX rate such that `cost * fxRate = cost_in_base`. Only populated when `FX_RATES_ENABLED=true` (see [FX Rate Enrichment](#fx-rate-enrichment))            |
-| `fxRateBase`   | `string \| null`    | ISO-4217 base currency the `fxRate` converts to                                                                                                          |
-| `fxRateSource` | `string \| null`    | `"historical"` or `"latest"` — whether the rate is the trade-day rate (paid API) or most recent (keyless)                                                |
-| `raw`          | `object`            | Original broker-specific payload (all fields, unmodified)                                                                                                |
+| Field          | Type                     | Description                                                                                                                                                            |
+| -------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `orderId`      | `string`                 | Permanent order identifier (unique per account)                                                                                                                        |
+| `symbol`       | `string`                 | Instrument symbol. For options, this is the OCC ticker with spaces removed for URL-friendliness (e.g. `AVGO260620C00200000`); the underlying is in `option.rootSymbol` |
+| `assetClass`   | `AssetClass`             | `"equity"`, `"option"`, `"crypto"`, `"future"`, `"forex"`, or `"other"`                                                                                                |
+| `side`         | `"buy" \| "sell"`        | Trade direction (lowercase)                                                                                                                                            |
+| `orderType`    | `OrderType \| null`      | Normalized: `"market"`, `"limit"`, `"stop"`, `"stop_limit"`, `"trailing_stop"`, or `null`                                                                              |
+| `price`        | `number`                 | VWAP when aggregated, single fill price otherwise                                                                                                                      |
+| `volume`       | `number`                 | Sum of fill quantities                                                                                                                                                 |
+| `cost`         | `number`                 | Total cost (sum of fills)                                                                                                                                              |
+| `fee`          | `number`                 | Total fees/commissions (always positive — amount paid)                                                                                                                 |
+| `fillCount`    | `number`                 | Number of fills aggregated into this trade                                                                                                                             |
+| `execIds`      | `string[]`               | One execution ID per fill (for tracing back to individual fills)                                                                                                       |
+| `timestamp`    | `string`                 | Latest fill timestamp. Canonical form: `YYYY-MM-DDTHH:MM:SS`, always UTC, no `Z` suffix, no fractional seconds                                                         |
+| `source`       | `string`                 | Origin: `"flex"` (IBKR Flex poll), `"execDetailsEvent"` / `"commissionReportEvent"` (IBKR WS), `"rest_poll"` (Kraken REST), `"ws_execution"` (Kraken WS)               |
+| `currency`     | `string \| null`         | ISO-4217 currency of the asset traded (e.g. `"USD"` for AAPL). `null` when the broker doesn't expose it                                                                |
+| `option`       | `OptionContract \| null` | Option contract metadata. Populated when `assetClass == "option"`, `null` for all other instruments. See [Option contracts](#option-contracts) below                   |
+| `fxRate`       | `number \| null`         | FX rate such that `cost * fxRate = cost_in_base`. Only populated when `FX_RATES_ENABLED=true` (see [FX Rate Enrichment](#fx-rate-enrichment))                          |
+| `fxRateBase`   | `string \| null`         | ISO-4217 base currency the `fxRate` converts to                                                                                                                        |
+| `fxRateSource` | `string \| null`         | `"historical"` or `"latest"` — whether the rate is the trade-day rate (paid API) or most recent (keyless)                                                              |
+| `raw`          | `object`                 | Original broker-specific payload (all fields, unmodified)                                                                                                              |
 
 The `raw` object preserves the full broker-specific data. For IBKR Flex, this includes ~100 XML attributes (account info, security details, financial fields, dates). Consumers should treat `raw` as opaque broker data — the CommonFill fields above are the stable contract.
 
 The `errors` array contains warnings about parse problems — it is empty when everything parsed cleanly.
+
+### Option contracts
+
+When `assetClass == "option"`, the `option` object is always present and contains:
+
+| Field        | Type              | Description                              |
+| ------------ | ----------------- | ---------------------------------------- |
+| `rootSymbol` | `string`          | Underlying ticker (e.g. `"AVGO"`)        |
+| `strike`     | `number`          | Strike price                             |
+| `expiryDate` | `string`          | Expiry date in ISO format (`YYYY-MM-DD`) |
+| `type`       | `"call" \| "put"` | Option type                              |
+
+Example — IBKR option trade (AVGO call, sold via Flex):
+
+```json
+{
+  "relay": "ibkr",
+  "type": "trades",
+  "data": [
+    {
+      "orderId": "684196620",
+      "symbol": "AVGO260620C00200000",
+      "assetClass": "option",
+      "side": "sell",
+      "orderType": "limit",
+      "price": 5.2,
+      "volume": 1.0,
+      "cost": 520.0,
+      "fee": 0.65,
+      "fillCount": 1,
+      "execIds": ["0001f4e8.67890abc.02.01"],
+      "timestamp": "2026-04-02T14:05:00",
+      "source": "flex",
+      "currency": "USD",
+      "option": {
+        "rootSymbol": "AVGO",
+        "strike": 200.0,
+        "expiryDate": "2026-06-20",
+        "type": "call"
+      },
+      "raw": { "...": "..." }
+    }
+  ],
+  "errors": []
+}
+```
+
+Rows with `assetClass == "option"` where option metadata is missing or invalid are skipped and surfaced in the `errors` array rather than emitted with an incomplete `option` object.
 
 The payload is signed with HMAC-SHA256. Verify using the `X-Signature-256` header:
 
