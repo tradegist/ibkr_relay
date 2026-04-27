@@ -189,7 +189,7 @@ Configuration is split across three environment files. Templates are in `env_exa
 | `NOTIFIERS`                         | No       | —       | Active notification backends (e.g. `webhook`). Empty = dry-run                                                  |
 | `TARGET_WEBHOOK_URL`                | No       | —       | Webhook endpoint (empty = log-only dry-run)                                                                     |
 | `WEBHOOK_SECRET`                    | No       | —       | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                            |
-| `POLL_INTERVAL`                     | No       | `600`   | Flex poll interval (seconds)                                                                                    |
+| `POLL_INTERVAL`                     | No       | `600`   | Flex poll interval (seconds). **IBKR limit: 10 req/hour per query ID — do not set below 420 (7 min)**           |
 | `POLLER_ENABLED`                    | No       | `true`  | Set to `false` to disable the poller globally (relay override: `{RELAY}_POLLER_ENABLED`)                        |
 | `LISTENER_ENABLED`                  | No       | —       | Set to `true` to enable real-time WS listeners globally; IBKR requires `ibkr_bridge`, Kraken does not           |
 | `LISTENER_DEBOUNCE_MS`              | No       | `0`     | Milliseconds to buffer fills before flushing                                                                    |
@@ -224,7 +224,7 @@ Configuration is split across three environment files. Templates are in `env_exa
 | `IBKR_NOTIFIERS`               | No       | Override `NOTIFIERS` for IBKR relay only                                                        |
 | `IBKR_TARGET_WEBHOOK_URL`      | No       | Override `TARGET_WEBHOOK_URL` for IBKR relay only                                               |
 | `IBKR_WEBHOOK_SECRET`          | No       | Override `WEBHOOK_SECRET` for IBKR relay only                                                   |
-| `IBKR_POLL_INTERVAL`           | No       | Override `POLL_INTERVAL` for IBKR relay only                                                    |
+| `IBKR_POLL_INTERVAL`           | No       | Override `POLL_INTERVAL` for IBKR relay only. **Minimum recommended: 420 (7 min)**              |
 | `IBKR_POLLER_ENABLED`          | No       | Override `POLLER_ENABLED` for IBKR relay only                                                   |
 | **Kraken**                     |          |                                                                                                 |
 | `KRAKEN_API_KEY`               | Yes\*    | Kraken API key (required when `kraken` is in `RELAYS`)                                          |
@@ -470,6 +470,8 @@ Before deploying, create an Activity Flex Query in IBKR Client Portal:
 ### IBKR polling (Flex Web Service)
 
 The IBKR poller calls the Flex Web Service at the configured interval (default: 600s). Override with `IBKR_POLL_INTERVAL` in `.env.relays`.
+
+> **Rate limit:** IBKR enforces a limit of **10 requests per hour per query ID**. Do not set `IBKR_POLL_INTERVAL` (or `POLL_INTERVAL`) below **420 seconds (7 minutes)** — at 6 minutes you are exactly at the limit with zero headroom for retries; below that you will receive `ErrorCode 1003` (too many requests). The default of 600s (10 min, 6 req/hour) provides a comfortable margin.
 
 > **Why Activity instead of Trade Confirmation?** Trade Confirmation queries are locked to "Today" only. Activity queries support a configurable lookback period, so if the droplet is offline for a few days the first poll after restart will catch all missed fills. The SQLite dedup prevents double-sending.
 

@@ -16,6 +16,8 @@ from .shared import AssetClass as AssetClass
 from .shared import BuySell as BuySell
 from .shared import Fill as Fill
 from .shared import FxRateSource as FxRateSource
+from .shared import OptionContract as OptionContract
 from .shared import OrderType as OrderType
+from .shared import RelayName as RelayName
 from .shared import Source as Source
 from .shared import Trade as Trade
