@@ -36,11 +36,11 @@ Answer to "is there an exchange-rate field?": Flex uses `fxRateToBase`
 import logging
 import xml.etree.ElementTree as ET
 from datetime import tzinfo
-from typing import Any
+from typing import Any, Literal
 
-from shared import BuySell, Fill, normalize_timestamp
+from shared import BuySell, Fill, OptionContract, normalize_timestamp
 
-from .timestamps import flex_to_iso
+from .timestamps import flex_date_to_iso, flex_to_iso
 from .utilities import normalize_asset_class, normalize_order_type
 
 log = logging.getLogger("flex_parser")
@@ -68,11 +68,38 @@ _ATTR_ALIASES: dict[str, str] = {
 _FLOAT_FIELDS: frozenset[str] = frozenset({
     "fxRateToBase", "quantity", "price", "taxes", "commission",
     "cost", "fifoPnlRealized", "tradeMoney", "proceeds", "netCash",
-    "closePrice", "mtmPnl", "accruedInt",
+    "closePrice", "mtmPnl", "accruedInt", "strike",
 })
+
+# Flex ``putCall`` values → OptionContract.type literals.
+_OPT_TYPE_MAP: dict[str, Literal["call", "put"]] = {
+    "C": "call",
+    "P": "put",
+}
 
 # XML tags that represent individual fills.
 _FILL_TAGS: tuple[str, ...] = ("TradeConfirmation", "TradeConfirm", "Trade")
+
+
+def _validate_fill_tags(tags: tuple[str, ...]) -> None:
+    """Reject ``<Order>`` summary elements as a fill source.
+
+    Activity Flex emits an ``<Order levelOfDetail="ORDER" ...>`` summary
+    immediately before its execution rows. Treating it as a fill would
+    double-count every order — it has no ``ibExecID``/``transactionID``
+    so the dedup guard wouldn't catch it (the parser would fall back to
+    ``tradeID``, which is also empty on Order rows, and skip it… but if
+    IBKR ever populates ``tradeID`` on Order rows, every executed order
+    would silently produce a duplicate Fill).
+    """
+    if "Order" in tags:
+        raise RuntimeError(
+            "_FILL_TAGS must not include 'Order' — Order rows are summary "
+            "elements (levelOfDetail=ORDER), not executions."
+        )
+
+
+_validate_fill_tags(_FILL_TAGS)
 
 # Flex XML buySell values → BuySell enum (lowercase).
 _SIDE_MAP: dict[str, BuySell] = {
@@ -91,6 +118,62 @@ def _parse_float(value: str, field: str, errors: list[str]) -> float:
     except (ValueError, TypeError):
         errors.append(f"Bad float for '{field}': {value!r}")
         return 0.0
+
+
+def _build_option_contract(
+    raw: dict[str, Any], tag: str, exec_id: str, errors: list[str],
+) -> OptionContract | None:
+    """Assemble an :class:`OptionContract` from a Flex option row's raw attrs.
+
+    Returns ``None`` and appends a per-row reason to *errors* when any
+    required field is missing or malformed. Caller skips the row in that
+    case — see comment at the call site for the rationale.
+    """
+    root_symbol = str(raw.get("underlyingSymbol", "")).strip()
+    if not root_symbol:
+        errors.append(
+            f"Skipping option <{tag}> execId={exec_id}: empty underlyingSymbol"
+        )
+        return None
+
+    # ``strike`` is in _FLOAT_FIELDS so raw["strike"] is already a float
+    # (defaulting to 0.0 when the attr was missing/empty). A real option
+    # always has a positive strike.
+    strike = float(raw.get("strike", 0.0))
+    if strike <= 0:
+        errors.append(
+            f"Skipping option <{tag}> execId={exec_id}: non-positive strike {strike!r}"
+        )
+        return None
+
+    expiry_raw = str(raw.get("expiry", "")).strip()
+    if not expiry_raw:
+        errors.append(
+            f"Skipping option <{tag}> execId={exec_id}: empty expiry"
+        )
+        return None
+    try:
+        expiry_iso = flex_date_to_iso(expiry_raw)
+    except ValueError as exc:
+        errors.append(
+            f"Skipping option <{tag}> execId={exec_id}: bad expiry {expiry_raw!r}: {exc}"
+        )
+        return None
+
+    put_call = str(raw.get("putCall", "")).strip()
+    opt_type = _OPT_TYPE_MAP.get(put_call)
+    if opt_type is None:
+        errors.append(
+            f"Skipping option <{tag}> execId={exec_id}: unknown putCall {put_call!r}"
+        )
+        return None
+
+    return OptionContract(
+        rootSymbol=root_symbol,
+        strike=strike,
+        expiryDate=expiry_iso,
+        type=opt_type,
+    )
 
 
 # ── Parse ────────────────────────────────────────────────────────────────
@@ -161,6 +244,17 @@ def parse_fills(
             currency_raw = str(raw.get("currency", "")).strip().upper()
             currency = currency_raw or None
 
+            # OptionContract — only built for option rows. Skip the row if
+            # any required option field is missing or invalid: emitting an
+            # option fill with incomplete metadata produces a webhook payload
+            # that consumers can't reliably interpret (e.g. unknown strike or
+            # type), worse than missing the fill altogether.
+            option: OptionContract | None = None
+            if asset_class == "option":
+                option = _build_option_contract(raw, tag, exec_id, errors)
+                if option is None:
+                    continue
+
             ts_raw = str(raw.get("dateTime", ""))
             if ts_raw:
                 try:
@@ -177,10 +271,14 @@ def parse_fills(
                 ts = ""
 
             try:
+                # IBKR pads the underlying ticker to 6 chars with spaces in
+                # the OCC symbol (e.g. "AVGO  260508C00375000"). Strip them so
+                # Fill.symbol is URL-friendly ("AVGO260508C00375000").
+                raw_symbol = str(raw.get("symbol", ""))
                 fill = Fill(
                     execId=exec_id,
                     orderId=str(raw.get("orderId", "")),
-                    symbol=str(raw.get("symbol", "")),
+                    symbol=raw_symbol.replace(" ", "") if asset_class == "option" else raw_symbol,
                     assetClass=asset_class,
                     side=side,
                     orderType=normalize_order_type(str(raw.get("orderType", ""))),
@@ -191,6 +289,7 @@ def parse_fills(
                     timestamp=ts,
                     source="flex",
                     currency=currency,
+                    option=option,
                     raw=raw,
                 )
             except Exception as exc:

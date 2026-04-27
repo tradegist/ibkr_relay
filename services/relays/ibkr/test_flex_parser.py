@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from relays.ibkr.flex_parser import parse_fills
+from relays.ibkr.flex_parser import _FILL_TAGS, _validate_fill_tags, parse_fills
 from shared import BuySell, Fill, Trade, aggregate_fills
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -125,6 +125,32 @@ TC_GOOG = (
 
 
 # ═════════════════════════════════════════════════════════════════════════
+#  _validate_fill_tags() — module-load guardrail
+# ═════════════════════════════════════════════════════════════════════════
+
+class TestValidateFillTags:
+    """Adding ``"Order"`` to ``_FILL_TAGS`` must crash at import.
+
+    ``<Order>`` rows are summary aggregations (levelOfDetail=ORDER) emitted
+    once per parent order, not per execution. If anyone wires them in as
+    a fill source, every executed order would be re-counted as a Fill —
+    inflating notifications and corrupting dedup state.
+    """
+
+    def test_real_fill_tags_pass(self) -> None:
+        # The real tuple imported from the parser must always validate.
+        _validate_fill_tags(_FILL_TAGS)
+
+    def test_order_tag_rejected(self) -> None:
+        with pytest.raises(RuntimeError, match="Order rows are summary"):
+            _validate_fill_tags(("Trade", "Order"))
+
+    def test_order_only_rejected(self) -> None:
+        with pytest.raises(RuntimeError, match="_FILL_TAGS"):
+            _validate_fill_tags(("Order",))
+
+
+# ═════════════════════════════════════════════════════════════════════════
 #  parse_fills() tests
 # ═════════════════════════════════════════════════════════════════════════
 
@@ -209,9 +235,17 @@ class TestParseFillsBasic:
     ])
     def test_asset_class_mapping(self, ibkr_cat: str, expected: str) -> None:
         """Each known IBKR assetCategory maps to the correct AssetClass."""
+        # OPT rows require the full option metadata to pass parser validation
+        # (underlyingSymbol, strike, expiry, putCall) — extra attributes on
+        # non-OPT rows are harmless because the parser only reads them when
+        # asset_class == "option".
+        opt_attrs = (
+            ' underlyingSymbol="Z" strike="100" expiry="20260508" putCall="C"'
+            if ibkr_cat == "OPT" else ""
+        )
         xml = _wrap_af(
             f'<Trade transactionID="777" symbol="Z" assetCategory="{ibkr_cat}"'
-            f' buySell="BUY" quantity="1" tradePrice="10" />'
+            f' buySell="BUY" quantity="1" tradePrice="10"{opt_attrs} />'
         )
         fills, errors = parse_fills(xml)
         assert len(fills) == 1, f"Expected 1 fill, got errors: {errors}"
@@ -326,6 +360,142 @@ class TestFieldNormalization:
         xml = _wrap_af(AF_AAPL)
         fills, _ = parse_fills(xml)
         assert fills[0].assetClass == "equity"
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#  OptionContract — populated for option rows only
+# ═════════════════════════════════════════════════════════════════════════
+
+# Reusable option Trade XML with every required field present.  Helper so
+# individual tests can mutate one attribute and exercise the validation
+# branches without 80-char attribute walls.
+def _option_trade(**overrides: str) -> str:
+    attrs: dict[str, str] = {
+        "transactionID": "1",
+        "ibOrderID": "O1",
+        "assetCategory": "OPT",
+        "buySell": "BUY",
+        "symbol": "AVGO  260508C00375000",
+        "underlyingSymbol": "AVGO",
+        "strike": "375",
+        "expiry": "20260508",
+        "putCall": "C",
+        "multiplier": "100",
+        "quantity": "1",
+        "tradePrice": "18.7",
+    }
+    attrs.update(overrides)
+    body = " ".join(f'{k}="{v}"' for k, v in attrs.items())
+    return f"<Trade {body} />"
+
+
+class TestOptionContract:
+    """Flex parser populates ``Fill.option`` only for option rows, with
+    every required field validated on the way in.
+
+    Equity rows get ``option=None`` even though Flex emits a redundant
+    ``underlyingSymbol`` attribute on them — surfacing it on equities
+    would weaken the "Fill.option set ⇔ derivative" signal consumers
+    rely on.
+    """
+
+    # ── happy path ───────────────────────────────────────────────────
+
+    def test_option_fill_has_full_option_contract(self) -> None:
+        fills, errors = parse_fills(_wrap_af(_option_trade()))
+        assert errors == []
+        assert fills[0].assetClass == "option"
+        opt = fills[0].option
+        assert opt is not None
+        assert opt.rootSymbol == "AVGO"
+        assert opt.strike == pytest.approx(375.0)
+        assert opt.expiryDate == "2026-05-08"
+        assert opt.type == "call"
+
+    def test_put_call_p_maps_to_put(self) -> None:
+        fills, errors = parse_fills(_wrap_af(_option_trade(putCall="P")))
+        assert errors == []
+        opt = fills[0].option
+        assert opt is not None
+        assert opt.type == "put"
+
+    def test_iso_expiry_accepted_defensive_forwarding(self) -> None:
+        # If IBKR ever ships ISO-formatted expiries instead of YYYYMMDD,
+        # ``flex_date_to_iso`` forwards them as-is — the relay keeps working
+        # without a code change.
+        fills, errors = parse_fills(_wrap_af(_option_trade(expiry="2026-05-08")))
+        assert errors == []
+        opt = fills[0].option
+        assert opt is not None
+        assert opt.expiryDate == "2026-05-08"
+
+    def test_equity_fill_has_no_option(self) -> None:
+        # Stock Trade rows carry underlyingSymbol="ALAB" (= symbol).
+        # The parser must produce option=None so consumers can use it as
+        # a derivative-detection signal.
+        xml = _wrap_af(
+            '<Trade transactionID="1" ibOrderID="O1" assetCategory="STK"'
+            ' buySell="BUY" symbol="ALAB" underlyingSymbol="ALAB"'
+            ' quantity="10" tradePrice="121.89" />'
+        )
+        fills, errors = parse_fills(xml)
+        assert errors == []
+        assert fills[0].assetClass == "equity"
+        assert fills[0].option is None
+
+    # ── validation: missing/invalid fields skip the row ──────────────
+
+    def test_option_missing_underlying_symbol_skipped(self) -> None:
+        # Empty rootSymbol would silently identify the wrong instrument
+        # — better to drop the row and surface the error.
+        fills, errors = parse_fills(_wrap_af(_option_trade(underlyingSymbol="")))
+        assert fills == []
+        assert any("empty underlyingSymbol" in e for e in errors)
+
+    def test_option_zero_strike_skipped(self) -> None:
+        fills, errors = parse_fills(_wrap_af(_option_trade(strike="0")))
+        assert fills == []
+        assert any("non-positive strike" in e for e in errors)
+
+    def test_option_missing_expiry_skipped(self) -> None:
+        fills, errors = parse_fills(_wrap_af(_option_trade(expiry="")))
+        assert fills == []
+        assert any("empty expiry" in e for e in errors)
+
+    def test_option_bad_expiry_format_skipped(self) -> None:
+        # ``flex_date_to_iso`` accepts both YYYYMMDD and ISO YYYY-MM-DD as a
+        # defensive measure against wire-format changes — pick a value that
+        # matches neither so we exercise the parser's error branch.
+        fills, errors = parse_fills(_wrap_af(_option_trade(expiry="20261308")))
+        assert fills == []
+        assert any("bad expiry" in e for e in errors)
+
+    def test_option_unknown_put_call_skipped(self) -> None:
+        # Financial enum — never assume a default. An unknown value must
+        # not silently coerce to "call" or "put".
+        fills, errors = parse_fills(_wrap_af(_option_trade(putCall="X")))
+        assert fills == []
+        assert any("unknown putCall" in e for e in errors)
+
+    # ── aggregation propagation ──────────────────────────────────────
+
+    def test_aggregate_fills_propagates_option(self) -> None:
+        """``Trade.option`` is copied from the last fill in the order."""
+        xml = _wrap_af(
+            _option_trade(transactionID="F1", ibOrderID="OPT_ORD",
+                          dateTime="20260410;105044"),
+            _option_trade(transactionID="F2", ibOrderID="OPT_ORD",
+                          dateTime="20260410;105045"),
+        )
+        fills, _ = parse_fills(xml)
+        trades = aggregate_fills(fills)
+        assert len(trades) == 1
+        opt = trades[0].option
+        assert opt is not None
+        assert opt.rootSymbol == "AVGO"
+        assert opt.strike == pytest.approx(375.0)
+        assert opt.expiryDate == "2026-05-08"
+        assert opt.type == "call"
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -883,30 +1053,95 @@ class TestLiveFixtures:
     """
 
     def test_activity_flex_sample_parses_cleanly(self) -> None:
+        """Five executions across four orders; no parse errors.
+
+        Mirrors a realistic Flex response: ``<Order>`` summary rows
+        interleaved with ``<Trade>`` execution rows, a multi-fill order,
+        and both stock and option asset classes.
+        """
         xml = (_FIXTURES_DIR / "activity_flex_sample.xml").read_text()
         fills, errors = parse_fills(xml)
 
         assert errors == []
-        assert len(fills) == 1
+        assert len(fills) == 5
 
-        fill = fills[0]
-        assert fill.symbol == "TSLA"
-        assert fill.assetClass == "equity"
-        assert fill.side == BuySell.BUY
-        assert fill.volume == 2.0
-        assert fill.source == "flex"
-        # execId flows from the sanitized ibExecID constant
-        assert fill.execId == "00018d97.00000001.01.01"
-        # Fixture has dateTime="20260413;093014" — canonical form, default UTC.
-        assert fill.timestamp == "2026-04-13T09:30:14"
+    def test_activity_flex_sample_ignores_order_summary_rows(self) -> None:
+        """``<Order levelOfDetail="ORDER"/>`` rows must not yield Fill objects.
+
+        The fixture has 4 ``<Order>`` rows + 5 ``<Trade>`` rows. If the
+        parser ever started consuming Order rows, fill count would jump
+        to 9 and dedup would do something unpredictable (Order rows have
+        empty ibExecID/transactionID/tradeID).
+        """
+        xml = (_FIXTURES_DIR / "activity_flex_sample.xml").read_text()
+        fills, _ = parse_fills(xml)
+        assert "<Order" in xml, "fixture should contain Order summary rows"
+        assert all(f.execId.startswith("00018d97.") for f in fills), (
+            "every fill must come from a <Trade>; Order rows have empty ibExecID"
+        )
+
+    def test_activity_flex_sample_includes_options(self) -> None:
+        """Both ``equity`` (STK) and ``option`` (OPT) asset classes are present."""
+        xml = (_FIXTURES_DIR / "activity_flex_sample.xml").read_text()
+        fills, _ = parse_fills(xml)
+        asset_classes = {f.assetClass for f in fills}
+        assert asset_classes == {"equity", "option"}
+
+    def test_activity_flex_sample_option_contract_on_options_only(self) -> None:
+        """``Fill.option`` is fully populated for options, None for stocks.
+
+        The AVGO option fills carry ``underlyingSymbol="AVGO"``,
+        ``strike="375"``, ``expiry="20260508"``, ``putCall="C"`` — every
+        field on :class:`OptionContract` must round-trip from the XML.
+        Equity fills (ALAB, CRCL) — where the Flex ``underlyingSymbol``
+        redundantly equals ``symbol`` — must have ``option=None`` so
+        consumers can distinguish derivatives.
+        """
+        xml = (_FIXTURES_DIR / "activity_flex_sample.xml").read_text()
+        fills, _ = parse_fills(xml)
+        for fill in fills:
+            if fill.assetClass == "option":
+                opt = fill.option
+                assert opt is not None, (
+                    f"option fill {fill.symbol!r} should have option populated"
+                )
+                assert opt.rootSymbol == "AVGO"
+                assert opt.strike == pytest.approx(375.0)
+                assert opt.expiryDate == "2026-05-08"
+                assert opt.type == "call"
+            else:
+                assert fill.option is None, (
+                    f"non-option fill {fill.symbol!r} should have option=None,"
+                    f" got {fill.option!r}"
+                )
+
+    def test_activity_flex_sample_aggregates_multi_fill_order(self) -> None:
+        """A multi-fill order collapses into a single Trade with summed volume.
+
+        The CRCL order has two fills (qty 1 + qty 99); aggregation must
+        produce a single Trade with vol=100, fillCount=2.
+        """
+        xml = (_FIXTURES_DIR / "activity_flex_sample.xml").read_text()
+        fills, _ = parse_fills(xml)
+        trades = aggregate_fills(fills)
+
+        # 4 distinct orderIds → 4 trades (one of which has 2 fills).
+        assert len(trades) == 4
+        crcl = next(t for t in trades if t.symbol == "CRCL")
+        assert crcl.fillCount == 2
+        assert crcl.volume == pytest.approx(100.0)
 
     def test_activity_flex_sample_timestamp_with_tz(self) -> None:
-        """With IBKR_ACCOUNT_TIMEZONE=America/New_York, the 09:30:14 NY time
-        (EDT, -04:00 in April) converts to 13:30:14 UTC."""
+        """Naive Flex timestamps are interpreted in the supplied tz.
+
+        ALAB BUY's dateTime is ``20260406;094731`` (April → EDT, -04:00)
+        which converts to 13:47:31 UTC.
+        """
         xml = (_FIXTURES_DIR / "activity_flex_sample.xml").read_text()
         fills, errors = parse_fills(xml, tz=ZoneInfo("America/New_York"))
         assert errors == []
-        assert fills[0].timestamp == "2026-04-13T13:30:14"
+        alab = next(f for f in fills if f.symbol == "ALAB")
+        assert alab.timestamp == "2026-04-06T13:47:31"
 
     def test_trade_confirm_sample_parses_cleanly(self) -> None:
         xml = (_FIXTURES_DIR / "trade_confirm_sample.xml").read_text()

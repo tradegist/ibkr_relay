@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +23,34 @@ from relay_core.listener_engine import (
     _strip_prefix,
 )
 from shared import BuySell, Fill
+
+# ── Module-level FX guard ────────────────────────────────────────────
+# _send_and_mark / _send_no_mark call enrich_if_enabled(), which reads
+# FX_RATES_ENABLED and caches a process-wide singleton on first use.
+# Force FX off for the entire module so a developer with
+# FX_RATES_ENABLED=true in their shell cannot make tests env-dependent
+# or trigger network / cache I/O.
+
+_ORIG_FX_ENABLED: str | None = None
+
+
+def setUpModule() -> None:
+    from relay_core.fx import _reset_for_tests
+
+    global _ORIG_FX_ENABLED
+    _ORIG_FX_ENABLED = os.environ.get("FX_RATES_ENABLED")
+    os.environ["FX_RATES_ENABLED"] = "false"
+    _reset_for_tests()
+
+
+def tearDownModule() -> None:
+    from relay_core.fx import _reset_for_tests
+
+    if _ORIG_FX_ENABLED is None:
+        os.environ.pop("FX_RATES_ENABLED", None)
+    else:
+        os.environ["FX_RATES_ENABLED"] = _ORIG_FX_ENABLED
+    _reset_for_tests()
 
 
 async def _dummy_connect(session: aiohttp.ClientSession) -> aiohttp.ClientWebSocketResponse:
@@ -394,6 +423,88 @@ class TestSendNoMark(unittest.TestCase):
         payload = mock_notify.call_args[0][1]
         self.assertEqual(payload.errors, ["unknown asset class"])
         self.assertEqual(payload.data, [])
+
+
+# ── Notifier-dispatch ordering contract ─────────────────────────────
+
+
+class TestDispatchOrdering(unittest.TestCase):
+    """Trades reach notify() sorted by timestamp ascending.
+
+    Sorted at each call site (not inside aggregate_fills), so verified
+    independently for both _send_and_mark and _send_no_mark.
+    """
+
+    @staticmethod
+    def _fill(exec_id: str, order_id: str, timestamp: str) -> Fill:
+        return Fill(
+            execId=exec_id,
+            orderId=order_id,
+            symbol="X",
+            assetClass="equity",
+            side=BuySell.BUY,
+            orderType=None,
+            price=100.0,
+            volume=1.0,
+            cost=100.0,
+            fee=0.0,
+            timestamp=timestamp,
+            source="commissionReportEvent",
+            raw={},
+        )
+
+    @patch("relay_core.listener_engine.mark_processed_batch")
+    @patch("relay_core.listener_engine.notify")
+    @patch("relay_core.listener_engine.get_processed_ids", return_value=set())
+    @patch("relay_core.listener_engine._init_dedup_db")
+    def test_send_and_mark_sorts_trades_by_timestamp_ascending(
+        self,
+        mock_init_db: MagicMock,
+        mock_get_ids: MagicMock,
+        mock_notify: MagicMock,
+        mock_mark: MagicMock,
+    ) -> None:
+        mock_init_db.return_value = MagicMock()
+
+        f_late = self._fill("L", "O_LATE", "2026-04-22T09:28:31")
+        f_early = self._fill("E", "O_EARLY", "2026-03-27T13:44:55")
+        f_mid = self._fill("M", "O_MID", "2026-04-06T09:47:31")
+
+        _send_and_mark("ibkr", [f_late, f_early, f_mid], "/tmp/test.db")
+
+        mock_notify.assert_called_once()
+        payload = mock_notify.call_args[0][1]
+        timestamps = [t.timestamp for t in payload.data]
+        self.assertEqual(
+            timestamps,
+            [
+                "2026-03-27T13:44:55",
+                "2026-04-06T09:47:31",
+                "2026-04-22T09:28:31",
+            ],
+        )
+
+    @patch("relay_core.listener_engine.notify")
+    def test_send_no_mark_sorts_trades_by_timestamp_ascending(
+        self, mock_notify: MagicMock,
+    ) -> None:
+        f_late = self._fill("L", "O_LATE", "2026-04-22T09:28:31")
+        f_early = self._fill("E", "O_EARLY", "2026-03-27T13:44:55")
+        f_mid = self._fill("M", "O_MID", "2026-04-06T09:47:31")
+
+        _send_no_mark("ibkr", [f_late, f_early, f_mid])
+
+        mock_notify.assert_called_once()
+        payload = mock_notify.call_args[0][1]
+        timestamps = [t.timestamp for t in payload.data]
+        self.assertEqual(
+            timestamps,
+            [
+                "2026-03-27T13:44:55",
+                "2026-04-06T09:47:31",
+                "2026-04-22T09:28:31",
+            ],
+        )
 
 
 # ── _handle_event tests ─────────────────────────────────────────────

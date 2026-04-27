@@ -16,6 +16,12 @@ def aggregate_fills(fills: list[Fill]) -> list[Trade]:
     * ``execIds`` — execId per fill.
     * ``fillCount`` — number of fills in the group.
     * ``raw`` — first fill's raw dict.
+
+    Aggregation is the only responsibility of this function — order of the
+    returned list is not part of its contract. The chronological-order
+    guarantee for notifier dispatch is enforced at each ``notify()`` call
+    site (poller and listener engines), so callers that aggregate-then-
+    concatenate-then-notify still get a sorted payload.
     """
     groups: dict[str, list[Fill]] = {}
     for fill in fills:
@@ -53,6 +59,7 @@ def aggregate_fills(fills: list[Fill]) -> list[Trade]:
             timestamp=last.timestamp,
             source=last.source,
             currency=last.currency,
+            option=last.option,
             raw=order_fills[0].raw,
         ))
 

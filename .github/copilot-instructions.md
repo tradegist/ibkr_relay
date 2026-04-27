@@ -199,11 +199,19 @@ Use the existing `ibkr` and `kraken` relays as reference implementations. IBKR d
 
 6. **Timestamp normalisation** — every `Fill.timestamp` must be in the canonical form `YYYY-MM-DDTHH:MM:SS` (UTC, no `Z`, no fractional seconds). See the [Timestamp normalisation convention](#timestamp-normalisation-convention-apply-to-all-relay-adapters) section below. If the broker's native timestamp format is not ISO-8601, add a `services/relays/<name>/timestamps.py` with a small `<format>_to_iso(raw) -> str` helper that validates and converts. The Flex/bridge parsers chain it as `normalize_timestamp(<format>_to_iso(raw), assume_tz=tz)`. **Never add broker format knowledge to `services/shared/time_format.py`** — that module must stay broker-agnostic.
 
-7. **Write tests** — colocate unit tests next to the source files (e.g. `test_<name>.py`). If you added a `timestamps.py`, add a `test_timestamps.py` with positive + negative cases (the point of the helper is to reject typos that `datetime.fromisoformat` would silently accept).
+7. **Option contracts** — if the broker supports option derivatives, populate `Fill.option` (type `OptionContract`) when `assetClass == "option"`, and leave it `None` for all other instruments. `OptionContract` fields:
+   - `rootSymbol: str` — the underlying ticker (e.g. `"AVGO"`). For IBKR, this is `contract.symbol` (not `contract.localSymbol`).
+   - `strike: float` — strike price.
+   - `expiryDate: str` — expiry in ISO `YYYY-MM-DD` form. Use `flex_date_to_iso()` (or a broker-equivalent) to convert compact dates.
+   - `type: Literal["call", "put"]` — derived from the broker's put/call indicator.
+   For IBKR: `Fill.symbol = contract.localSymbol` with spaces stripped (OCC ticker, e.g. `"AVGO260620C00200000"`) and `option.rootSymbol = contract.symbol` (underlying, e.g. `"AVGO"`). IBKR pads the underlying to 6 characters with spaces in the OCC format — always `.replace(" ", "")` so the symbol is URL-friendly.
+   **Never emit a fill with `assetClass == "option"` when option metadata is missing or invalid** — skip the row and surface a parse error instead. An incomplete `option` object is worse than a missing fill.
 
-8. **Update README** — add the relay's env vars, webhook payload examples, and any broker-specific setup instructions.
+8. **Write tests** — colocate unit tests next to the source files (e.g. `test_<name>.py`). If you added a `timestamps.py`, add a `test_timestamps.py` with positive + negative cases (the point of the helper is to reject typos that `datetime.fromisoformat` would silently accept).
 
-9. **Verify** — `make test`, `make typecheck`, `make lint` must all pass.
+9. **Update README** — add the relay's env vars, webhook payload examples, and any broker-specific setup instructions.
+
+10. **Verify** — `make test`, `make typecheck`, `make lint` must all pass.
 
 ### Env file flow
 
@@ -407,7 +415,8 @@ services/relays/kraken/
 - **`flex_fetch.py` is a pure library** — it exposes `fetch_flex_report()` and `RedactTokenFilter` but contains no CLI code. It is imported by `__init__.py` (relay runtime) and `flex_dump.py` (CLI). Never add `if __name__ == "__main__"` blocks or `argparse` back into `flex_fetch.py` — doing so causes a `sys.modules` conflict because `__init__.py` imports it at package load time.
 - **`flex_dump.py` is the CLI entrypoint** — invoked via `python -m relays.ibkr.flex_dump --token TOKEN --query-id ID [--dump PATH]`. It receives credentials as explicit CLI args (sourced from `.env.relays` by the Makefile) rather than reading env vars directly, keeping env-var ownership in `__init__.py`'s getters.
 - **`RedactTokenFilter` is public** (no underscore) — it is exported from `flex_fetch.py` and used by both `__init__.py` (relay runtime logging) and `flex_dump.py` (CLI logging). Private (`_`-prefixed) names are only for identifiers with no external consumers.
-- **Fixture management** — `fixtures/sanitize.py` replaces real account/order/execution IDs in a raw Flex dump with synthetic values, then caps the output at 3 fill rows. Run `make ibkr-flex-refresh [S=_2]` to fetch a live response, auto-detect the report type (Activity Flex vs Trade Confirmation), sanitize it, and write to the appropriate fixture file. Raw dumps (before sanitization) must never be committed — they contain real account IDs. The two committed fixtures (`activity_flex_sample.xml`, `trade_confirm_sample.xml`) contain only synthetic IDs and are safe to commit.
+- **Option mapping** — for `assetCategory == "OPT"` fills, `Fill.symbol = contract.localSymbol.replace(" ", "")` (OCC ticker with spaces stripped, e.g. `"AVGO260620C00200000"`) and `Fill.option.rootSymbol = contract.symbol` (underlying, e.g. `"AVGO"`). IBKR pads the underlying to 6 characters with spaces in the raw OCC ticker — always strip them so `Fill.symbol` is URL-friendly. The `strike`, `expiryDate` (via `flex_date_to_iso()`), and `type` (`"call"`/`"put"` from the `putCall` attribute) are required — rows with missing or invalid option metadata are skipped with a parse error.
+- **Fixture management** — `fixtures/sanitize.py` replaces real account/order/execution IDs in a raw Flex dump with synthetic values, then trims the fixture to at most 6 distinct orders (`max_orders` / `_MAX_ORDERS = 6`) while keeping all executions for the retained orders. Run `make ibkr-flex-refresh [S=_2]` to fetch a live response, auto-detect the report type (Activity Flex vs Trade Confirmation), sanitize it, and write to the appropriate fixture file. Raw dumps (before sanitization) must never be committed — they contain real account IDs. The two committed fixtures (`activity_flex_sample.xml`, `trade_confirm_sample.xml`) contain only synthetic IDs and are safe to commit.
 
 ### Kraken adapter
 
@@ -519,7 +528,7 @@ This project has **three model locations** — each owns a distinct contract lay
 
 | File                                     | Domain                      | Contains                                                                     |
 | ---------------------------------------- | --------------------------- | ---------------------------------------------------------------------------- |
-| `services/shared/models.py`              | CommonFill primitives       | `Fill`, `Trade`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `RelayName` |
+| `services/shared/models.py`              | CommonFill primitives       | `Fill`, `Trade`, `OptionContract`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `RelayName` |
 | `services/relay_core/notifier/models.py` | Notifier payload (outbound) | `WebhookPayloadTrades`, `WebhookPayload`                                     |
 | `services/relay_core/relay_models.py`    | Relay API (outbound)        | Re-exports notifier payload + `RunPollResponse`, `HealthResponse`            |
 

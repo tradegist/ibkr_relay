@@ -8,6 +8,36 @@
       "title": "BuySell",
       "type": "string"
     },
+    "OptionContract": {
+      "additionalProperties": false,
+      "description": "Option-specific contract metadata.\n\nPopulated only on fills/trades whose ``assetClass == \"option\"``. Future\nderivatives (futures, FOPs, warrants) will get their own sibling\ncontract objects rather than reusing this one \u2014 see\n``docs/migrate-trade-models-to-discriminated-union.md`` for the planned\ndiscriminated-union evolution.",
+      "properties": {
+        "rootSymbol": {
+          "type": "string"
+        },
+        "strike": {
+          "type": "number"
+        },
+        "expiryDate": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "call",
+            "put"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "rootSymbol",
+        "strike",
+        "expiryDate",
+        "type"
+      ],
+      "title": "OptionContract",
+      "type": "object"
+    },
     "Trade": {
       "additionalProperties": false,
       "description": "Aggregated trade (one or more fills for the same order).",
@@ -73,6 +103,17 @@
           ],
           "default": null
         },
+        "option": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OptionContract"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "fxRate": {
           "anyOf": [
             {
@@ -126,6 +167,7 @@
         "timestamp",
         "source",
         "currency",
+        "option",
         "fxRate",
         "fxRateBase",
         "fxRateSource",
@@ -193,6 +235,17 @@
           ],
           "default": null
         },
+        "option": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OptionContract"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "raw": {
           "additionalProperties": true,
           "type": "object"
@@ -212,6 +265,7 @@
         "timestamp",
         "source",
         "currency",
+        "option",
         "raw"
       ],
       "title": "Fill",
