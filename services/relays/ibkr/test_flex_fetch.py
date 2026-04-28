@@ -245,3 +245,17 @@ class TestFetchFlexReport(unittest.TestCase):
 
         params = mock_get.call_args_list[0].kwargs["params"]
         self.assertNotIn("p", params)
+
+    def test_lookback_days_below_minimum_raises(
+        self, mock_get: MagicMock, _sleep: MagicMock,
+    ) -> None:
+        with self.assertRaises(ValueError):
+            fetch_flex_report("tok", "qid", lookback_days=0)
+        mock_get.assert_not_called()
+
+    def test_lookback_days_above_maximum_raises(
+        self, mock_get: MagicMock, _sleep: MagicMock,
+    ) -> None:
+        with self.assertRaises(ValueError):
+            fetch_flex_report("tok", "qid", lookback_days=366)
+        mock_get.assert_not_called()

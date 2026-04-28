@@ -61,6 +61,11 @@ def fetch_flex_report(
 
     Returns the raw XML text on success, or ``None`` on any error.
     """
+    if lookback_days is not None and not 1 <= lookback_days <= 365:
+        raise ValueError(
+            f"lookback_days must be between 1 and 365, got {lookback_days!r}"
+        )
+
     headers = {"User-Agent": USER_AGENT}
     params: dict[str, str] = {"t": flex_token, "q": flex_query_id, "v": "3"}
     if lookback_days is not None:
