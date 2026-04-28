@@ -2,6 +2,7 @@ import subprocess
 
 from cli import REMOTE_DIR, get_relay_env
 from cli.core import die, env, load_env, ssh_cmd
+from relay_core.poller_engine import WATERMARK_KEY_SUFFIX
 
 
 def _build_script(relay_names: list[str]) -> str:
@@ -22,10 +23,10 @@ def _build_script(relay_names: list[str]) -> str:
         "conn = sqlite3.connect(META_DB_PATH); "
         # Existing watermark keys (covers multi-account indices already in the DB)
         'rows = conn.execute("SELECT key FROM metadata").fetchall(); '
-        'existing = {r[0] for r in rows if r[0].endswith(":last_poll_ts")}; '
+        f'existing = {{r[0] for r in rows if r[0].endswith(":{WATERMARK_KEY_SUFFIX}")}}; '
         # Index-0 keys derived from the RELAYS env var (creates entries even when DB is empty)
         'configured = [r.strip() for r in os.environ.get("RELAYS", "").split(",") if r.strip()]; '
-        'expected = {r + ":last_poll_ts" for r in configured}; '
+        f'expected = {{r + ":{WATERMARK_KEY_SUFFIX}" for r in configured}}; '
         # Union, then apply relay_filter
         'keys = [k for k in existing | expected if relay_filter is None or k.split(":")[0] in relay_filter]; '
         '[conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", (k, str(now))) for k in keys]; '
