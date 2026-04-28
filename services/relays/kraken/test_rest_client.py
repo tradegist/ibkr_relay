@@ -1,7 +1,9 @@
 """Tests for KrakenClient.get_ws_token validation."""
 
+import threading
 import unittest
-from unittest.mock import patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 from .rest_client import KrakenClient
 
@@ -50,3 +52,107 @@ class TestGetWsTokenValidation(unittest.TestCase):
         with self.assertRaises(RuntimeError) as cm:
             self._call_with_result({"token": 12345})
         self.assertIn("invalid token value", str(cm.exception))
+
+
+class TestNonceMonotonic(unittest.TestCase):
+    """_next_nonce must produce a strictly increasing sequence even under contention."""
+
+    def test_consecutive_calls_strictly_increase(self) -> None:
+        client = _make_client()
+        previous = client._next_nonce()
+        for _ in range(1000):
+            current = client._next_nonce()
+            self.assertGreater(current, previous)
+            previous = current
+
+    def test_concurrent_threads_produce_unique_nonces_no_duplicates(self) -> None:
+        client = _make_client()
+        results: list[int] = []
+        results_lock = threading.Lock()
+
+        def worker() -> None:
+            local: list[int] = []
+            for _ in range(200):
+                local.append(client._next_nonce())
+            with results_lock:
+                results.extend(local)
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(len(results), 8 * 200)
+        self.assertEqual(len(set(results)), len(results))
+
+
+class TestRequestSerialization(unittest.TestCase):
+    """_request must not let a second thread enter httpx.post until the first completes."""
+
+    def test_second_thread_blocked_and_nonces_strictly_ordered(self) -> None:
+        client = _make_client()
+
+        first_entered = threading.Event()
+        release_first = threading.Event()
+        nonces_sent: list[int] = []
+        active_lock = threading.Lock()
+        active_in_post = 0
+        max_concurrent_in_post = 0
+
+        def mock_post(*args: Any, **kwargs: Any) -> MagicMock:
+            nonlocal active_in_post, max_concurrent_in_post
+            with active_lock:
+                active_in_post += 1
+                if active_in_post > max_concurrent_in_post:
+                    max_concurrent_in_post = active_in_post
+            data: dict[str, Any] = kwargs.get("data", {})
+            nonces_sent.append(int(data["nonce"]))
+            if not first_entered.is_set():
+                first_entered.set()
+                release_first.wait()
+            with active_lock:
+                active_in_post -= 1
+            resp = MagicMock()
+            resp.raise_for_status.return_value = None
+            resp.json.return_value = {"error": [], "result": {}}
+            return resp
+
+        t2_at_lock = threading.Event()
+
+        with patch("relays.kraken.rest_client.httpx.post", side_effect=mock_post):
+            t2_done = threading.Event()
+
+            def thread2() -> None:
+                first_entered.wait()
+                t2_at_lock.set()  # signal: about to attempt _request_lock
+                client._request("/0/private/GetWebSocketsToken")
+                t2_done.set()
+
+            t1 = threading.Thread(target=client._request, args=("/0/private/TradesHistory",))
+            t2 = threading.Thread(target=thread2)
+
+            t1.start()
+            first_entered.wait()
+            t2.start()
+            t2_at_lock.wait()  # t2 has passed the gate; t1 still holds _request_lock
+
+            self.assertEqual(
+                len(nonces_sent),
+                1,
+                "t2 must not enter httpx.post while t1 holds _request_lock",
+            )
+            self.assertEqual(max_concurrent_in_post, 1)
+
+            release_first.set()
+            t1.join(timeout=2)
+            self.assertFalse(t1.is_alive(), "t1 did not finish within 2 seconds")
+            self.assertTrue(t2_done.wait(timeout=2))
+
+            self.assertEqual(len(nonces_sent), 2)
+            self.assertLess(
+                nonces_sent[0],
+                nonces_sent[1],
+                "nonces must be strictly increasing in the order httpx.post receives them",
+            )
+            self.assertEqual(max_concurrent_in_post, 1, "serialization must hold throughout")
