@@ -1,5 +1,6 @@
 """Tests for KrakenClient.get_ws_token validation."""
 
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -50,3 +51,40 @@ class TestGetWsTokenValidation(unittest.TestCase):
         with self.assertRaises(RuntimeError) as cm:
             self._call_with_result({"token": 12345})
         self.assertIn("invalid token value", str(cm.exception))
+
+
+class TestNonceMonotonic(unittest.TestCase):
+    """_next_nonce must produce a strictly increasing sequence even under contention."""
+
+    def test_consecutive_calls_strictly_increase(self) -> None:
+        client = _make_client()
+        previous = client._next_nonce()
+        for _ in range(1000):
+            current = client._next_nonce()
+            self.assertGreater(current, previous)
+            previous = current
+
+    def test_concurrent_threads_produce_unique_nonces_no_duplicates(self) -> None:
+        client = _make_client()
+        results: list[int] = []
+        results_lock = threading.Lock()
+
+        def worker() -> None:
+            local: list[int] = []
+            for _ in range(200):
+                # Mirror production call ordering: _request acquires the
+                # same lock around _next_nonce, so two threads cannot
+                # observe an interleaved nonce.
+                with client._request_lock:
+                    local.append(client._next_nonce())
+            with results_lock:
+                results.extend(local)
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(len(results), 8 * 200)
+        self.assertEqual(len(set(results)), len(results))

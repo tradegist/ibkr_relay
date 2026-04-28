@@ -205,31 +205,49 @@ def _build_parse() -> Callable[[str], tuple[list[Fill], list[str]]]:
     return parse
 
 
-def _build_poller_configs() -> list[PollerConfig]:
-    """Build PollerConfig(s) from env vars.
+def _resolve_client() -> KrakenClient | None:
+    """Resolve credentials into a single shared KrakenClient.
 
-    Returns an empty list when polling is disabled or no API
-    credentials are configured (listener-only mode).
+    Returns None if neither API_KEY nor API_SECRET is set (no Kraken
+    integration). Raises SystemExit on partial config or invalid
+    base64 secret. The same client must be shared by the poller and
+    the listener so nonce generation is serialised across both.
     """
-    if not is_poller_enabled("kraken"):
-        return []
-
     api_key = _get_api_key()
     api_secret = _get_api_secret()
 
     if not api_key and not api_secret:
-        return []
+        return None
 
     if not api_key or not api_secret:
         missing = "KRAKEN_API_SECRET" if api_key else "KRAKEN_API_KEY"
         raise SystemExit(
-            f"Kraken poller partially configured — {missing} must be set"
+            f"Kraken partially configured — {missing} must be set"
         )
 
     try:
-        client = KrakenClient(api_key, api_secret)
+        return KrakenClient(api_key, api_secret)
     except RuntimeError as exc:
-        raise SystemExit(f"Kraken poller config error: {exc}") from exc
+        raise SystemExit(f"Kraken client config error: {exc}") from exc
+
+
+def _build_poller_configs(client: KrakenClient | None = None) -> list[PollerConfig]:
+    """Build PollerConfig(s) from env vars.
+
+    Returns an empty list when polling is disabled or no API
+    credentials are configured (listener-only mode). When ``client``
+    is None, the client is resolved from env — entry points that need
+    nonce coordination across poller and listener should pass a
+    pre-built shared client.
+    """
+    if not is_poller_enabled("kraken"):
+        return []
+
+    if client is None:
+        client = _resolve_client()
+    if client is None:
+        return []
+
     interval = get_poll_interval("kraken")
     lookback_days = _get_lookback_days()
 
@@ -307,24 +325,23 @@ def _build_connect(client: KrakenClient) -> Callable[[aiohttp.ClientSession], Aw
     return connect
 
 
-def _build_listener_config() -> ListenerConfig | None:
-    """Build ListenerConfig if listener is enabled, else return None."""
+def _build_listener_config(client: KrakenClient | None = None) -> ListenerConfig | None:
+    """Build ListenerConfig if listener is enabled, else return None.
+
+    When ``client`` is None, the client is resolved from env — entry
+    points that need nonce coordination across poller and listener
+    should pass a pre-built shared client.
+    """
     if not is_listener_enabled("kraken"):
         return None
 
-    api_key = _get_api_key()
-    api_secret = _get_api_secret()
-
-    if not api_key or not api_secret:
+    if client is None:
+        client = _resolve_client()
+    if client is None:
         raise SystemExit(
             "Kraken listener enabled but KRAKEN_API_KEY and "
             "KRAKEN_API_SECRET must be set"
         )
-
-    try:
-        client = KrakenClient(api_key, api_secret)
-    except RuntimeError as exc:
-        raise SystemExit(f"Kraken listener config error: {exc}") from exc
 
     return ListenerConfig(
         connect=_build_connect(client),
@@ -339,8 +356,12 @@ def _build_listener_config() -> ListenerConfig | None:
 
 def build_relay(notifiers: list[BaseNotifier]) -> BrokerRelay:
     """Build a fully configured Kraken relay instance."""
-    poller_configs = _build_poller_configs()
-    listener_config = _build_listener_config()
+    # Single shared client so poller and listener serialise their
+    # nonces against the same lock (Kraken rejects out-of-order
+    # nonces on a per-API-key basis).
+    client = _resolve_client()
+    poller_configs = _build_poller_configs(client)
+    listener_config = _build_listener_config(client)
 
     if not poller_configs and listener_config is None:
         raise SystemExit(

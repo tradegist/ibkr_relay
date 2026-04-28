@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import logging
+import threading
 import time
 import urllib.parse
 from typing import Any
@@ -26,9 +27,25 @@ class KrakenClient:
             raise RuntimeError(
                 f"KRAKEN_API_SECRET is not valid base64: {exc}"
             ) from exc
+        # Kraken tracks the highest nonce ever seen for an API key and
+        # rejects any later request with a lower nonce as EAPI:Invalid
+        # nonce. Holding the lock around nonce generation + send keeps
+        # Kraken's view strictly monotonic when the poller and listener
+        # fire concurrently, and the _last_nonce floor protects against
+        # NTP backwards-jumps and microsecond-resolution collisions.
+        self._request_lock = threading.Lock()
+        self._last_nonce = 0
 
     def _get_secret(self) -> bytes:
         return self._api_secret_decoded
+
+    def _next_nonce(self) -> int:
+        """Return a strictly-increasing nonce. Caller must hold the request lock."""
+        candidate = int(time.time() * 1_000_000)
+        if candidate <= self._last_nonce:
+            candidate = self._last_nonce + 1
+        self._last_nonce = candidate
+        return candidate
 
     def _sign(self, urlpath: str, data: dict[str, str | int]) -> str:
         """Compute API-Sign header value."""
@@ -42,19 +59,19 @@ class KrakenClient:
 
     def _request(self, urlpath: str, extra_data: dict[str, str | int] | None = None) -> dict[str, Any]:
         """Make an authenticated POST request to a private Kraken endpoint."""
-        nonce = int(time.time() * 1_000_000)
-        data: dict[str, str | int] = {"nonce": nonce}
-        if extra_data:
-            data.update(extra_data)
+        with self._request_lock:
+            data: dict[str, str | int] = {"nonce": self._next_nonce()}
+            if extra_data:
+                data.update(extra_data)
 
-        sig = self._sign(urlpath, data)
-        headers = {
-            "API-Key": self._api_key,
-            "API-Sign": sig,
-        }
+            sig = self._sign(urlpath, data)
+            headers = {
+                "API-Key": self._api_key,
+                "API-Sign": sig,
+            }
 
-        url = f"{_BASE_URL}{urlpath}"
-        resp = httpx.post(url, data=data, headers=headers, timeout=15)
+            url = f"{_BASE_URL}{urlpath}"
+            resp = httpx.post(url, data=data, headers=headers, timeout=15)
         resp.raise_for_status()
 
         try:
