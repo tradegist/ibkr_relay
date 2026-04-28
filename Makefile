@@ -125,7 +125,7 @@ test: ## Run unit tests
 	PYTHONPATH=.:services:services/relay_core:services/debug $(PYTHON) -m pytest -v
 
 typecheck: ## Run mypy strict type checking
-	MYPYPATH=services/relay_core:services $(PYTHON) -m mypy cli/test_webhook.py
+	MYPYPATH=services/relay_core:services $(PYTHON) -m mypy cli/
 	MYPYPATH=services $(PYTHON) -m mypy services/shared/
 	MYPYPATH=services $(PYTHON) -m mypy services/relay_core/
 	MYPYPATH=services $(PYTHON) -m mypy services/relays/

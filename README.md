@@ -645,11 +645,11 @@ source .env && curl -s -X POST "https://${SITE_DOMAIN}/relays/ibkr/poll/1" \
 
 ## Watermark Management
 
-The relay uses a timestamp watermark per poller to skip fills already seen in previous cycles. In normal operation this is fully automatic. Use `watermark-reset` when you want to force the next poll to reprocess recent fills — for example, after fixing a parse bug, swapping a webhook destination, or recovering from an extended outage.
+The relay uses a timestamp watermark per poller to skip fills already seen in previous cycles. In normal operation this is fully automatic. Use `watermark-reset` to fast-forward the watermark to the current time so the next poll skips any older backlog and starts fresh from new fills only. This is useful when you intentionally want to discard a backlog — for example, after a long outage when you only care about new activity going forward.
 
 ```bash
-make watermark-reset              # reset watermark for all relays to now
-make watermark-reset RELAY=ibkr  # reset ibkr only
+make watermark-reset              # set watermark to now for all relays
+make watermark-reset RELAY=ibkr  # set watermark to now for ibkr only
 make watermark-reset ENV=local    # target the local Docker stack
 ```
 

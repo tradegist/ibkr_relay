@@ -15,7 +15,7 @@ _PROJECT_MODULES: dict[str, str] = {
 }
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="RelayPort CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -43,7 +43,7 @@ def main():
                    help="Which poller's webhook URL (default: 1)")
 
     p = sub.add_parser("watermark-reset",
-                       help="Reset timestamp watermark to now (all poller indices)")
+                       help="Reset existing timestamp watermark entries to now")
     p.add_argument("relays", nargs="*", metavar="RELAY",
                    help="Relay name(s) to reset (default: all)")
 

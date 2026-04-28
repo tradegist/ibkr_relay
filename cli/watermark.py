@@ -1,3 +1,5 @@
+import argparse
+import re
 import subprocess
 
 from cli import REMOTE_DIR, get_relay_env
@@ -16,16 +18,16 @@ def _build_script(relay_names: list[str]) -> str:
     """
     f_repr = "{" + ", ".join(f'"{n}"' for n in relay_names) + "}" if relay_names else "None"
     return (
-        "import sqlite3, time, os; "
-        "from relay_core.poller_engine import META_DB_PATH; "
+        "import time, os; "
+        "from relay_core.poller_engine import init_meta_db; "
         f"relay_filter = {f_repr}; "
         "now = int(time.time()); "
-        "conn = sqlite3.connect(META_DB_PATH); "
+        "conn = init_meta_db(); "
         # Existing watermark keys (covers multi-account indices already in the DB)
         'rows = conn.execute("SELECT key FROM metadata").fetchall(); '
         f'existing = {{r[0] for r in rows if r[0].endswith(":{WATERMARK_KEY_SUFFIX}")}}; '
         # Index-0 keys derived from the RELAYS env var (creates entries even when DB is empty)
-        'configured = [r.strip() for r in os.environ.get("RELAYS", "").split(",") if r.strip()]; '
+        'configured = [r.strip().lower() for r in os.environ.get("RELAYS", "").split(",") if r.strip()]; '
         f'expected = {{r + ":{WATERMARK_KEY_SUFFIX}" for r in configured}}; '
         # Union, then apply relay_filter
         'keys = [k for k in existing | expected if relay_filter is None or k.split(":")[0] in relay_filter]; '
@@ -36,9 +38,12 @@ def _build_script(relay_names: list[str]) -> str:
     )
 
 
-def run(args) -> None:
+def run(args: argparse.Namespace) -> None:
     load_env()
-    relay_names: list[str] = getattr(args, "relays", None) or []
+    relay_names: list[str] = [n.lower() for n in (getattr(args, "relays", None) or [])]
+    for name in relay_names:
+        if not re.match(r"^[a-z0-9_]+$", name):
+            die(f"Invalid relay name {name!r} — must contain only letters, digits, and underscores")
     relay_env = get_relay_env()
     is_local = relay_env == "local"
     target = "local" if is_local else "prod"
