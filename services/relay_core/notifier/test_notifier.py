@@ -273,7 +273,7 @@ class TestNotifyAlerter:
         # The contract: send_alert is best-effort. If it raises, the caller's
         # NotificationError must still surface. We assert the *original*
         # delivery error reaches the caller.
-        with pytest.raises((NotificationError, RuntimeError)):
+        with pytest.raises(NotificationError):
             notify([n1], _SamplePayload(symbol="AAPL"), relay_name="ibkr")
 
     @patch("relay_core.notifier.send_alert")

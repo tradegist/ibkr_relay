@@ -263,15 +263,20 @@ def notify(
             )
             failures.append((notifier_name, last_exc))
             suffix = getattr(notifier, "_suffix", "") or "-"
-            send_alert(
-                subject=_format_alert_subject(notifier_name, last_exc, relay_name),
-                body=_format_alert_body(
-                    notifier, last_exc,
-                    relay_name=relay_name,
-                    attempts=1 + retries,
-                ),
-                key=f"{notifier_name}:{relay_name or '-'}:{suffix}",
-            )
+            try:
+                send_alert(
+                    subject=_format_alert_subject(notifier_name, last_exc, relay_name),
+                    body=_format_alert_body(
+                        notifier, last_exc,
+                        relay_name=relay_name,
+                        attempts=1 + retries,
+                    ),
+                    key=f"{notifier_name}:{relay_name or '-'}:{suffix}",
+                )
+            except Exception:
+                log.exception(
+                    "send_alert raised — suppressing to preserve notify contract",
+                )
 
     if succeeded == 0:
         raise NotificationError(failures)
