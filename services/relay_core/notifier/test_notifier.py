@@ -301,6 +301,25 @@ class TestNotifyAlerter:
         assert "AAPL" not in body
 
     @patch("relay_core.notifier.send_alert")
+    def test_alert_reports_actual_attempts_on_non_retryable_error(
+        self, mock_alert: MagicMock,
+    ) -> None:
+        """A non-retryable 4xx exits after 1 attempt even when retries > 0."""
+        import httpx
+        n1 = MagicMock()
+        n1._suffix = ""
+        resp = MagicMock(status_code=400)
+        n1.send.side_effect = httpx.HTTPStatusError(
+            "400", request=MagicMock(), response=resp,
+        )
+
+        with pytest.raises(NotificationError):
+            notify([n1], _SamplePayload(symbol="AAPL"), relay_name="ibkr", retries=3)
+
+        body = mock_alert.call_args.kwargs["body"]
+        assert "Attempts:    1" in body
+
+    @patch("relay_core.notifier.send_alert")
     def test_alert_key_includes_suffix(self, mock_alert: MagicMock) -> None:
         n1 = MagicMock()
         n1._suffix = "_2"

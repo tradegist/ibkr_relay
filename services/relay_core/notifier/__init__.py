@@ -236,7 +236,9 @@ def notify(
 
     for notifier in notifiers:
         last_exc: Exception | None = None
+        attempts_made = 0
         for attempt in range(1 + retries):
+            attempts_made = attempt + 1
             try:
                 notifier.send(payload)
                 succeeded += 1
@@ -248,7 +250,7 @@ def notify(
                     delay_s = retry_delay_ms / 1000.0
                     log.warning(
                         "Notifier %s attempt %d/%d failed: %s — retrying in %.1fs",
-                        type(notifier).__name__, attempt + 1, 1 + retries,
+                        type(notifier).__name__, attempts_made, 1 + retries,
                         exc, delay_s,
                     )
                     time.sleep(delay_s)
@@ -260,7 +262,7 @@ def notify(
             notifier_name = type(notifier).__name__
             log.error(
                 "Notifier %s failed after %d attempt(s): %s",
-                notifier_name, 1 + retries, last_exc,
+                notifier_name, attempts_made, last_exc,
             )
             failures.append((notifier_name, last_exc))
             suffix = getattr(notifier, "_suffix", "") or "-"
@@ -270,7 +272,7 @@ def notify(
                     body=_format_alert_body(
                         notifier, last_exc,
                         relay_name=relay_name,
-                        attempts=1 + retries,
+                        attempts=attempts_made,
                     ),
                     key=f"{notifier_name}:{relay_name or '-'}:{suffix}",
                 )

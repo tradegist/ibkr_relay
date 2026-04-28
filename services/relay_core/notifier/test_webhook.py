@@ -129,14 +129,16 @@ class TestWebhookNotifier:
     def test_4xx_includes_response_body_in_message(
         self, mock_post: MagicMock,
     ) -> None:
-        """The response body must be surfaced in the exception message so
-        downstream alerting (logs, emails) can show *why* the receiver
+        """A text/plain response body must be surfaced in the exception message
+        so downstream alerting (logs, emails) can show *why* the receiver
         rejected the request."""
         import httpx
 
         resp = MagicMock()
         resp.status_code = 400
         resp.text = "You've exceeded your daily quota"
+        resp.content = resp.text.encode()
+        resp.headers = {"Content-Type": "text/plain"}
         resp.raise_for_status.side_effect = httpx.HTTPStatusError(
             "Client error '400 Bad Request' for url 'https://example.com/hook'",
             request=MagicMock(), response=resp,

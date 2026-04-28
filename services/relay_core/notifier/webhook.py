@@ -9,6 +9,7 @@ import httpx
 from pydantic import BaseModel
 
 from relay_core.env import get_env
+from shared import safe_http_error_context
 
 from .base import BaseNotifier
 
@@ -144,13 +145,14 @@ class WebhookNotifier(BaseNotifier):
         try:
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            # Surface the response body in the exception message so downstream
-            # error reporting (logs, alerter emails) can show *why* the
-            # receiver rejected the request.  httpx.HTTPStatusError's default
-            # __str__() only includes status + URL.
-            body_excerpt = exc.response.text[:500]
+            # Surface a sanitised diagnostic context (request-id, capped
+            # text/json body) so downstream logs and alert emails can
+            # show *why* the receiver rejected the request without
+            # echoing arbitrary HTML/binary content.
+            context = safe_http_error_context(exc.response)
+            msg = f"{exc} — {context}" if context else str(exc)
             raise httpx.HTTPStatusError(
-                f"{exc} — body: {body_excerpt}",
+                msg,
                 request=exc.request,
                 response=exc.response,
             ) from exc
