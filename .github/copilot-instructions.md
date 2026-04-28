@@ -421,6 +421,7 @@ services/relays/kraken/
 ### Kraken adapter
 
 - **`build_relay(notifiers)`** constructs a `BrokerRelay` with a Kraken REST poller (TradesHistory endpoint) and an optional WS v2 listener (executions channel).
+- **Single shared `KrakenClient`** — `build_relay()` calls `_resolve_client()` once and passes the resulting client to both `_build_poller_configs()` and `_build_listener_config()`. This is required for nonce correctness: Kraken tracks the highest nonce ever seen per API key and rejects any request with a lower nonce (`EAPI:Invalid nonce`). The `KrakenClient` holds a `threading.Lock` and a `_last_nonce` floor so nonces are strictly monotonic even when the poller and listener fire concurrently. Never create separate `KrakenClient` instances for the poller and listener — they would race on nonce ordering.
 - **Poller** — `KrakenClient.get_trades_history()` returns JSON; the parse callback maps each trade via `_parse_rest_trade()` into a `Fill` with `source="rest_poll"`.
 - **Listener** — the `connect` callback obtains a short-lived WS token via REST (`GetWebSocketsToken`), opens a websocket to `wss://ws-auth.kraken.com/v2`, sends a subscription message for the `executions` channel, and returns the ready websocket. The `on_message` callback uses `ws_parser.parse_executions()` to extract multiple fills per message with `source="ws_execution"`.
 - **All asset classes are `"crypto"`** — Kraken is a crypto-only exchange.
