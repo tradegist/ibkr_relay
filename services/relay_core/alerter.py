@@ -58,7 +58,7 @@ def send_alert(*, subject: str, body: str, key: str) -> None:
     Args:
         subject: Inbox-friendly subject line.
         body: Plain-text body. Must NOT include trade payloads or secrets.
-        key: Throttling key (e.g. ``"WebhookNotifier:ibkr:"``). Callers
+        key: Throttling key (e.g. ``"WebhookNotifier:ibkr:-"``). Callers
              with the same key share a cooldown window.
     """
     try:
@@ -74,27 +74,40 @@ def send_alert(*, subject: str, body: str, key: str) -> None:
             if last and (now - last) < cooldown_s:
                 log.debug("Alert suppressed (cooldown active for key=%r)", key)
                 return
+            # Optimistic claim: setting the timestamp inside the lock prevents
+            # concurrent callers from POSTing the same alert. Rolled back below
+            # if delivery fails so a broken destination doesn't suppress retries.
             _last_alert_at[key] = now
 
-        payload = {
-            "from": _get_alert_from(),
-            "to": [to],
-            "subject": subject,
-            "text": body,
-        }
-        resp = httpx.post(
-            _RESEND_API_URL,
-            json=payload,
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=_HTTP_TIMEOUT_S,
-        )
-        if 200 <= resp.status_code < 300:
-            log.info("Alert sent to %s (HTTP %d)", to, resp.status_code)
-        else:
-            log.error(
-                "Alert delivery failed: HTTP %d body=%s",
-                resp.status_code, resp.text[:200],
+        delivered = False
+        try:
+            payload = {
+                "from": _get_alert_from(),
+                "to": [to],
+                "subject": subject,
+                "text": body,
+            }
+            resp = httpx.post(
+                _RESEND_API_URL,
+                json=payload,
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=_HTTP_TIMEOUT_S,
             )
+            if 200 <= resp.status_code < 300:
+                log.info("Alert sent to %s (HTTP %d)", to, resp.status_code)
+                delivered = True
+            else:
+                log.error(
+                    "Alert delivery failed: HTTP %d body=%s",
+                    resp.status_code, resp.text[:200],
+                )
+        finally:
+            if not delivered:
+                with _lock:
+                    # Only roll back our own claim — a later caller may have
+                    # already retried and recorded a fresh timestamp.
+                    if _last_alert_at.get(key) == now:
+                        _last_alert_at.pop(key, None)
     except SystemExit as exc:
         # Env-var validation (cooldown parse, etc.) raises SystemExit — log
         # and swallow so a misconfigured alert var never crashes the relay.

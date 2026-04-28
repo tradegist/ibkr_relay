@@ -282,14 +282,18 @@ class TestNotifyAlerter:
     ) -> None:
         n1 = MagicMock()
         n1._suffix = "_2"
-        n1._url = "https://my.endpoint/hook"
+        n1._url = "https://my.endpoint/hook?token=SECRET"
         n1.send.side_effect = RuntimeError("boom")
 
         with pytest.raises(NotificationError):
             notify([n1], _SamplePayload(symbol="AAPL"), relay_name="kraken")
 
         body = mock_alert.call_args.kwargs["body"]
-        assert "https://my.endpoint/hook" in body
+        # Host kept, last path segment + query string redacted.
+        assert "https://my.endpoint/***" in body
+        assert "hook" not in body
+        assert "SECRET" not in body
+        assert "token=" not in body
         assert "kraken" in body
         assert "_2" in body
         assert "Attempts:    1" in body

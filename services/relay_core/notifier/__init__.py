@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from relay_core.alerter import send_alert
 from relay_core.env import get_env, get_env_int
+from shared import redact_url
 
 from .base import BaseNotifier
 from .webhook import WebhookNotifier
@@ -186,7 +187,7 @@ def _format_alert_body(
     alert email.
     """
     suffix = getattr(notifier, "_suffix", "") or "(none)"
-    destination = getattr(notifier, "_url", "<unknown>")
+    destination = redact_url(getattr(notifier, "_url", "<unknown>"))
     timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     return (
         f"Notifier:    {type(notifier).__name__}\n"

@@ -115,12 +115,34 @@ class TestCooldown:
             send_alert(subject="s", body="b", key="kraken")
         assert mock_post.call_count == 2
 
-    def test_invalid_cooldown_raises_systemexit(self) -> None:
+    def test_failed_delivery_does_not_engage_cooldown(self) -> None:
+        """A non-2xx response must not suppress the next attempt."""
+        with patch.dict("os.environ", _ENABLED_ENV, clear=True), \
+             patch("relay_core.alerter.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=500, text="boom")
+            send_alert(subject="s1", body="b1", key="same")
+            send_alert(subject="s2", body="b2", key="same")
+        assert mock_post.call_count == 2
+
+    def test_network_error_does_not_engage_cooldown(self) -> None:
+        """An httpx exception must not suppress the next attempt."""
+        with patch.dict("os.environ", _ENABLED_ENV, clear=True), \
+             patch("relay_core.alerter.httpx.post") as mock_post:
+            mock_post.side_effect = httpx.ConnectError("refused")
+            send_alert(subject="s1", body="b1", key="same")
+            send_alert(subject="s2", body="b2", key="same")
+        assert mock_post.call_count == 2
+
+    def test_invalid_cooldown_does_not_raise(self) -> None:
+        """Invalid ALERT_COOLDOWN_MINUTES must not propagate to the caller.
+
+        ``_get_cooldown_seconds()`` raises SystemExit, but the alerter's
+        outer try/except swallows it so a misconfigured env var can never
+        crash the relay.
+        """
         env = {**_ENABLED_ENV, "ALERT_COOLDOWN_MINUTES": "-1"}
         with patch.dict("os.environ", env, clear=True), \
              patch("relay_core.alerter.httpx.post"):
-            # SystemExit is caught by the alerter's outer try/except so the
-            # caller never sees it — verify by asserting no propagation.
             send_alert(subject="s", body="b", key="k")  # must not raise
 
 
